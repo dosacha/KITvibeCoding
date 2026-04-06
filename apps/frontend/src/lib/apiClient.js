@@ -29,8 +29,29 @@ async function request(path, options = {}) {
 }
 
 export const apiClient = {
-  login: (payload) => request("/frontend/login", { method: "POST", body: payload }),
-  me: (token) => request("/frontend/me", { token }),
+  login: async (payload) => {
+    const response = await request("/auth/login", { method: "POST", body: payload });
+    return {
+      accessToken: response.access_token,
+      user: {
+        id: response.user.id,
+        name: response.user.full_name,
+        email: response.user.email,
+        role: response.user.role,
+      },
+    };
+  },
+  me: async (token) => {
+    const response = await request("/auth/me", { token });
+    return {
+      user: {
+        id: response.user.id,
+        name: response.user.full_name,
+        email: response.user.email,
+        role: response.user.role,
+      },
+    };
+  },
   getInstructorDashboard: (token) => request("/frontend/dashboard/instructor", { token }),
   getStudentDashboard: (token) => request("/frontend/dashboard/student", { token }),
   getStudents: (token) => request("/frontend/students", { token }),

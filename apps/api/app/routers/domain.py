@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..dependencies import get_current_user, require_roles
+from ..dependencies import require_roles
 from ..models import Exam, Question, Role, StudentProfile, Subject, Unit
 from ..schemas import (
-    CurrentUserResponse,
     ExamCreate,
     ExamRead,
     ExamUpdate,
@@ -37,11 +36,6 @@ from ..services.domain import (
 
 
 router = APIRouter(tags=["domain"])
-
-
-@router.get("/auth/me", response_model=CurrentUserResponse)
-def me(current_user=Depends(get_current_user)) -> CurrentUserResponse:
-    return CurrentUserResponse(user=current_user)
 
 
 @router.post("/exams", response_model=ExamRead)

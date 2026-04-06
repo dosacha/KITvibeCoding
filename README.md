@@ -1,33 +1,34 @@
 # UnitFlow AI MVP
 
-학생 진단, 목표 대학 기준 점수 차이 계산, 맞춤 학습 전략 제안을 위한 교육 AI 서비스.
+학생 진단, 목표 대학 기준 점수 격차 계산, 맞춤 학습 전략 제안을 위한 교육 AI 서비스다.
 
 ## 공식 실행 경로
 
 - 백엔드: `apps/api`
 - 프런트엔드: `apps/frontend`
 
-`apps/frontend`가 정식 프런트엔드다.
+현재 공식 프런트엔드는 `apps/frontend` 하나다.
 
 ## 저장소 구조
 
 ```text
 apps/
   api/        FastAPI 기반 백엔드
-  frontend/   Vite + React 기반 정식 프런트엔드
+  frontend/   Vite + React 기반 프런트엔드
 scripts/
   demo_smoke_check.ps1
 ```
 
-## 주요 기능
+## 핵심 기능
 
 - 역할 기반 로그인
 - 학생별 취약 유형 진단
-- 과목별 현재 위치 분석
-- 목표 대학 기준 점수 차이 계산
-- 맞춤 학습 전략 제안
-- 시험 등록 및 조회
-- 대학 정책 조회
+- 목표 대학 기준 점수 격차 계산
+- 학생 맞춤 학습 전략 제안
+- 강사용 학생 요약 대시보드
+- 시험 등록, 수정, 문항 등록
+- 학생 결과 입력과 전략 재계산
+- 대학 정책 조회, 등록, 수정
 
 ## 환경 변수
 
@@ -77,29 +78,45 @@ npm run dev
 - 강사: `instructor@unitflow.ai` / `password123`
 - 학생: `student@unitflow.ai` / `password123`
 
-프런트엔드 로그인 우회용 비밀번호는 제거했다.  
-이제 백엔드에 저장된 실제 계정 비밀번호만 사용한다.
-
 ## 주요 API
 
-- `POST /frontend/login`
-- `GET /frontend/me`
+인증:
+
+- `POST /auth/login`
+- `GET /auth/me`
+
+프런트 화면용 데이터:
+
 - `GET /frontend/dashboard/instructor`
 - `GET /frontend/dashboard/student`
 - `GET /frontend/students`
 - `GET /frontend/students/{student_id}`
 - `GET /frontend/exams`
 - `GET /frontend/metadata`
-- `GET /frontend/universities`
-- `POST /frontend/exams`
+
+운영 CRUD:
+
+- `GET /exams`
+- `POST /exams`
+- `PUT /exams/{exam_id}`
+- `GET /exams/{exam_id}/questions`
+- `POST /questions`
+- `PUT /questions/{question_id}`
+- `GET /students/{student_profile_id}/results`
+- `POST /student-results`
+- `POST /students/{student_profile_id}/recalculate`
+- `GET /universities/policies`
+- `POST /universities/policies`
+- `PUT /universities/policies/{policy_id}`
 
 ## 검증 명령
 
-백엔드 정적 검증:
+백엔드 검증:
 
 ```powershell
 cd apps/api
 python -m compileall app tests
+.\.venv\Scripts\python.exe -m pytest tests\test_domain_services.py tests\test_engines.py tests\test_frontend_adapter.py tests\test_frontend_schemas.py tests\test_university_policy_services.py
 ```
 
 프런트엔드 빌드 검증:
@@ -114,3 +131,23 @@ npm run build
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo_smoke_check.ps1
 ```
+
+## 데모 흐름
+
+강사 흐름:
+
+1. 강사 계정 로그인
+2. 강사용 요약 확인
+3. 학생 목록 진입
+4. 학생 상세 진입
+5. 학생 결과 입력
+6. 전략 다시 계산 확인
+7. 시험 관리에서 시험과 문항 등록
+8. 목표 대학 정책 화면에서 정책 등록 또는 수정
+
+학생 흐름:
+
+1. 학생 계정 로그인
+2. 나의 학습 전략 확인
+3. 진단 근거 확인
+4. 우선 보완 과목과 단원 확인

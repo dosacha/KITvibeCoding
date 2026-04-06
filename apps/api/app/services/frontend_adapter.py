@@ -270,7 +270,7 @@ def get_frontend_instructor_dashboard(db: Session) -> dict:
     return {
         "stats": [
             {"label": "관리 학생 수", "value": f"{len(students)}", "sub": "진단 데이터가 있는 학생 기준"},
-            {"label": "우선 상담 학생", "value": f"{high_priority_count}", "sub": "목표 대학 격차 기준"},
+            {"label": "우선 상담 학생", "value": f"{high_priority_count}", "sub": "목표 대비 격차 기준"},
             {"label": "최근 시험 평균", "value": f"{round(latest_avg, 1)}" if latest_avg is not None else "-", "sub": "가장 최근 집계 시험"},
             {"label": "저장된 전략", "value": f"{len(recent_strategies)}", "sub": "분석 완료 학생 기준"},
         ],
