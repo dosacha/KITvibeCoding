@@ -8,16 +8,26 @@ from ..schemas import (
     FrontendExamCreate,
     FrontendExamItem,
     FrontendExamsResponse,
+    FrontendInstructorDashboardResponse,
     FrontendLoginRequest,
     FrontendLoginResponse,
     FrontendMeResponse,
     FrontendSessionUser,
+    FrontendStudentDetailResponse,
     FrontendStudentsResponse,
+    FrontendUniversityPoliciesResponse,
 )
 from ..security import create_access_token
 from ..services.domain import create_exam
 from ..services.frontend_auth import authenticate_frontend_user
-from ..services.frontend_adapter import list_frontend_exams, list_frontend_students
+from ..services.frontend_adapter import (
+    get_frontend_instructor_dashboard,
+    get_frontend_student_detail,
+    get_frontend_student_detail_by_user,
+    list_frontend_exams,
+    list_frontend_students,
+    list_frontend_university_policies,
+)
 
 
 router = APIRouter(prefix="/frontend", tags=["frontend"])
@@ -56,12 +66,51 @@ def get_frontend_students(
     return FrontendStudentsResponse(students=list_frontend_students(db))
 
 
+@router.get("/students/{student_id}", response_model=FrontendStudentDetailResponse)
+def get_frontend_student(
+    student_id: str,
+    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
+    db: Session = Depends(get_db),
+) -> FrontendStudentDetailResponse:
+    student = get_frontend_student_detail(db, student_id)
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend student not found")
+    return FrontendStudentDetailResponse.model_validate(student)
+
+
 @router.get("/exams", response_model=FrontendExamsResponse)
 def get_frontend_exams(
     current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
     db: Session = Depends(get_db),
 ) -> FrontendExamsResponse:
     return FrontendExamsResponse(exams=list_frontend_exams(db))
+
+
+@router.get("/dashboard/instructor", response_model=FrontendInstructorDashboardResponse)
+def get_frontend_instructor_dashboard_route(
+    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
+    db: Session = Depends(get_db),
+) -> FrontendInstructorDashboardResponse:
+    return FrontendInstructorDashboardResponse.model_validate(get_frontend_instructor_dashboard(db))
+
+
+@router.get("/dashboard/student", response_model=FrontendStudentDetailResponse)
+def get_frontend_student_dashboard_route(
+    current_user=Depends(require_roles(Role.STUDENT)),
+    db: Session = Depends(get_db),
+) -> FrontendStudentDetailResponse:
+    student = get_frontend_student_detail_by_user(db, current_user.id)
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend student dashboard not found")
+    return FrontendStudentDetailResponse.model_validate(student)
+
+
+@router.get("/universities", response_model=FrontendUniversityPoliciesResponse)
+def get_frontend_universities(
+    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
+    db: Session = Depends(get_db),
+) -> FrontendUniversityPoliciesResponse:
+    return FrontendUniversityPoliciesResponse(universities=list_frontend_university_policies(db))
 
 
 @router.post("/exams", response_model=FrontendExamItem)

@@ -183,6 +183,98 @@ class FrontendExamsResponse(BaseModel):
     exams: list[FrontendExamItem]
 
 
+class FrontendDashboardStat(BaseModel):
+    label: str
+    value: str
+    sub: str | None = None
+
+
+class FrontendWeaknessDistributionItem(BaseModel):
+    weaknessTypeId: str
+    label: str
+    count: int
+
+
+class FrontendExamTrendPoint(BaseModel):
+    name: str
+    averageScore: float
+
+
+class FrontendWeakUnitItem(BaseModel):
+    unitId: int
+    unitName: str
+    subjectCode: str
+    mastery: float
+
+
+class FrontendRecentStrategyItem(BaseModel):
+    studentId: str
+    studentName: str
+    consultPriority: str
+    weaknessTypes: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class FrontendInstructorDashboardResponse(BaseModel):
+    stats: list[FrontendDashboardStat]
+    consultPriorityStudents: list[FrontendStudentListItem]
+    weaknessDistribution: list[FrontendWeaknessDistributionItem]
+    examTrend: list[FrontendExamTrendPoint]
+    weakUnits: list[FrontendWeakUnitItem]
+    recentStrategies: list[FrontendRecentStrategyItem]
+
+
+class FrontendStudentSubjectItem(BaseModel):
+    subjectId: str
+    subjectCode: str
+    subjectName: str
+    currentScore: float
+    targetScore: float
+    trend: list[float] = Field(default_factory=list)
+    stability: float
+    universityWeight: float
+    isPreferred: bool = False
+
+
+class FrontendStudentDiagnosisSummary(BaseModel):
+    primaryWeaknessType: str | None = None
+    weaknessTypes: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FrontendStudentStrategySummary(BaseModel):
+    summary: str
+    prioritySubjects: list[dict[str, Any]] = Field(default_factory=list)
+    priorityUnits: list[dict[str, Any]] = Field(default_factory=list)
+    timeAllocation: list[dict[str, Any]] = Field(default_factory=list)
+    coachingPoints: list[str] = Field(default_factory=list)
+    antiPatterns: list[str] = Field(default_factory=list)
+
+
+class FrontendStudentDetailResponse(BaseModel):
+    student: FrontendStudentListItem
+    subjects: list[FrontendStudentSubjectItem]
+    diagnosis: FrontendStudentDiagnosisSummary
+    strategy: FrontendStudentStrategySummary
+    weakUnits: list[FrontendWeakUnitItem]
+    targetGap: dict[str, Any]
+
+
+class FrontendUniversityPolicyItem(BaseModel):
+    id: int
+    universityName: str
+    admissionType: str
+    subjectWeights: dict[str, float]
+    requiredSubjects: list[str] = Field(default_factory=list)
+    bonusRules: list[dict[str, Any]] = Field(default_factory=list)
+    targetScore: float
+    notes: str | None = None
+
+
+class FrontendUniversityPoliciesResponse(BaseModel):
+    universities: list[FrontendUniversityPolicyItem]
+
+
 class FrontendLoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=4)

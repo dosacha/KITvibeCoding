@@ -5,18 +5,18 @@ from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..engines.features import build_student_features
 from ..models import (
+    ClassGroup,
     Exam,
     Question,
-    Role,
-    StudentDiagnosis,
     StudentProfile,
     StudentResult,
     Subject,
     TargetUniversityProfile,
     UniversityScorePolicy,
 )
-from ..services.analytics import get_latest_diagnosis
+from ..services.analytics import get_latest_diagnosis, get_latest_strategy
 
 
 WEAKNESS_TYPE_TO_FRONTEND = {
@@ -27,6 +27,37 @@ WEAKNESS_TYPE_TO_FRONTEND = {
     "type_bias": "wt5",
     "high_variability": "wt6",
 }
+
+WEAKNESS_TYPE_LABELS = {
+    "wt1": "Concept gap",
+    "wt2": "Calculation mistakes",
+    "wt3": "Time pressure",
+    "wt4": "Prerequisite gap",
+    "wt5": "Type bias",
+    "wt6": "High variability",
+}
+
+FRONTEND_SUBJECT_MAP = {
+    "KOR": {"subjectId": "s1", "subjectName": "Korean"},
+    "MATH": {"subjectId": "s2", "subjectName": "Mathematics"},
+    "ENG": {"subjectId": "s3", "subjectName": "English"},
+    "SCI": {"subjectId": "s4", "subjectName": "Science Inquiry"},
+    "SOC": {"subjectId": "s5", "subjectName": "Social Inquiry"},
+}
+
+
+def _parse_frontend_student_id(student_id: str) -> int:
+    if student_id.startswith("st"):
+        student_id = student_id[2:]
+    return int(student_id)
+
+
+def _build_consult_priority(gap_score: float) -> str:
+    if gap_score >= 20:
+        return "high"
+    if gap_score >= 8:
+        return "medium"
+    return "low"
 
 
 def _build_target_university_label(db: Session, student_profile: StudentProfile) -> str | None:
@@ -41,75 +72,109 @@ def _build_target_university_label(db: Session, student_profile: StudentProfile)
     return f"{policy.university_name} {target_profile.target_department}"
 
 
-def _build_consult_priority(gap_score: float) -> str:
-    if gap_score >= 20:
-        return "high"
-    if gap_score >= 8:
-        return "medium"
-    return "low"
+def _build_class_group_name(class_groups: dict[int, ClassGroup], student_profile: StudentProfile) -> str | None:
+    if not student_profile.class_group_id:
+        return None
+    class_group = class_groups.get(student_profile.class_group_id)
+    return class_group.name if class_group else None
+
+
+def _build_frontend_weakness_types(diagnosis) -> list[str]:
+    if not diagnosis:
+        return []
+
+    weakness_type_ids: list[str] = []
+    primary_id = WEAKNESS_TYPE_TO_FRONTEND.get(diagnosis.primary_weakness_type.value)
+    if primary_id:
+        weakness_type_ids.append(primary_id)
+
+    for weakness_type, score in (diagnosis.weakness_scores or {}).items():
+        if score < 0.7:
+            continue
+        mapped = WEAKNESS_TYPE_TO_FRONTEND.get(weakness_type)
+        if mapped and mapped not in weakness_type_ids:
+            weakness_type_ids.append(mapped)
+    return weakness_type_ids
+
+
+def _student_results_by_student(db: Session) -> tuple[dict[int, list[StudentResult]], dict[int, Exam]]:
+    results = db.query(StudentResult).order_by(StudentResult.created_at.desc()).all()
+    exams = {exam.id: exam for exam in db.query(Exam).all()}
+    results_by_student: dict[int, list[StudentResult]] = {}
+    for result in results:
+        results_by_student.setdefault(result.student_profile_id, []).append(result)
+    return results_by_student, exams
+
+
+def _build_recent_exam_items(student_results: list[StudentResult], exams: dict[int, Exam]) -> list[dict]:
+    recent_exams: list[dict] = []
+    for result in student_results[:4]:
+        exam = exams.get(result.exam_id)
+        if not exam:
+            continue
+        recent_exams.append(
+            {
+                "id": f"e{exam.id}",
+                "name": exam.name,
+                "date": exam.exam_date.isoformat(),
+                "totalScore": result.raw_score,
+                "maxScore": exam.total_score,
+            }
+        )
+    return list(reversed(recent_exams))
+
+
+def _build_student_list_item(
+    db: Session,
+    student_profile: StudentProfile,
+    class_groups: dict[int, ClassGroup],
+    student_results: list[StudentResult],
+    exams: dict[int, Exam],
+) -> dict:
+    diagnosis = get_latest_diagnosis(db, student_profile.id)
+    target_gap = {}
+    if diagnosis and diagnosis.feature_snapshot:
+        target_gap = diagnosis.feature_snapshot.get("target_gap", {})
+    gap_score = float(target_gap.get("gap", 0.0))
+
+    return {
+        "id": f"st{student_profile.id}",
+        "name": student_profile.user.full_name,
+        "grade": student_profile.grade_level,
+        "classGroup": _build_class_group_name(class_groups, student_profile),
+        "targetUniv": _build_target_university_label(db, student_profile),
+        "weaknessTypes": _build_frontend_weakness_types(diagnosis),
+        "recentExams": _build_recent_exam_items(student_results, exams),
+        "consultPriority": _build_consult_priority(gap_score),
+        "gapScore": round(gap_score, 2),
+    }
+
+
+def _recommend_subject_target(current_score: float, target_gap: dict, subject_code: str) -> float:
+    target_score = float(target_gap.get("target_score", current_score))
+    gap_score = max(0.0, float(target_gap.get("gap", 0.0)))
+    subject_weights = target_gap.get("subject_weights", {}) or {}
+    total_weight = sum(subject_weights.values()) or 1.0
+    weight = float(subject_weights.get(subject_code, 0.0))
+    weighted_bonus = gap_score * ((weight / total_weight) + 0.35)
+    return round(min(100.0, max(current_score, target_score, current_score + weighted_bonus)), 2)
 
 
 def list_frontend_students(db: Session) -> list[dict]:
     student_profiles = db.query(StudentProfile).all()
-    results = (
-        db.query(StudentResult)
-        .order_by(StudentResult.created_at.desc())
-        .all()
-    )
-    exams = {exam.id: exam for exam in db.query(Exam).all()}
+    class_groups = {item.id: item for item in db.query(ClassGroup).all()}
+    results_by_student, exams = _student_results_by_student(db)
 
-    results_by_student: dict[int, list[StudentResult]] = {}
-    for result in results:
-        results_by_student.setdefault(result.student_profile_id, []).append(result)
-
-    student_items: list[dict] = []
-    for student_profile in student_profiles:
-        diagnosis = get_latest_diagnosis(db, student_profile.id)
-        weak_type_ids: list[str] = []
-        if diagnosis:
-            primary_id = WEAKNESS_TYPE_TO_FRONTEND.get(diagnosis.primary_weakness_type.value)
-            if primary_id:
-                weak_type_ids.append(primary_id)
-            for weakness_type, score in (diagnosis.weakness_scores or {}).items():
-                if score >= 0.7:
-                    mapped = WEAKNESS_TYPE_TO_FRONTEND.get(weakness_type)
-                    if mapped and mapped not in weak_type_ids:
-                        weak_type_ids.append(mapped)
-
-        feature_gap = 0.0
-        if diagnosis and diagnosis.feature_snapshot:
-            feature_gap = float(diagnosis.feature_snapshot.get("target_gap", {}).get("gap", 0.0))
-
-        recent_exams = []
-        student_results = results_by_student.get(student_profile.id, [])
-        for result in student_results[:4]:
-            exam = exams.get(result.exam_id)
-            if not exam:
-                continue
-            recent_exams.append(
-                {
-                    "id": f"e{exam.id}",
-                    "name": exam.name,
-                    "date": exam.exam_date.isoformat(),
-                    "totalScore": result.raw_score,
-                    "maxScore": exam.total_score,
-                }
-            )
-
-        student_items.append(
-            {
-                "id": f"st{student_profile.id}",
-                "name": student_profile.user.full_name,
-                "grade": student_profile.grade_level,
-                "classGroup": getattr(student_profile, "class_group_id", None) and f"{student_profile.class_group_id}반" or None,
-                "targetUniv": _build_target_university_label(db, student_profile),
-                "weaknessTypes": weak_type_ids,
-                "recentExams": list(reversed(recent_exams)),
-                "consultPriority": _build_consult_priority(feature_gap),
-                "gapScore": round(feature_gap, 2),
-            }
+    student_items = [
+        _build_student_list_item(
+            db,
+            student_profile,
+            class_groups,
+            results_by_student.get(student_profile.id, []),
+            exams,
         )
-
+        for student_profile in student_profiles
+    ]
     student_items.sort(key=lambda item: item["gapScore"], reverse=True)
     return student_items
 
@@ -129,11 +194,177 @@ def list_frontend_exams(db: Session) -> list[dict]:
                 "id": f"e{exam.id}",
                 "name": exam.name,
                 "date": exam.exam_date.isoformat(),
-                "status": "완료" if exam.exam_date <= date.today() else "예정",
-                "subject": subject.name if subject else "전과목",
+                "status": "completed" if exam.exam_date <= date.today() else "scheduled",
+                "subject": subject.name if subject else "All subjects",
                 "questionCount": int(question_count),
                 "avgScore": round(float(avg_score), 2) if avg_score is not None else None,
                 "participantCount": int(participant_count),
             }
         )
     return exam_items
+
+
+def get_frontend_instructor_dashboard(db: Session) -> dict:
+    students = list_frontend_students(db)
+    exams = list_frontend_exams(db)
+    student_profiles = db.query(StudentProfile).all()
+    strategies = {item.id: get_latest_strategy(db, item.id) for item in student_profiles}
+
+    weakness_distribution: list[dict] = []
+    for weakness_id, label in WEAKNESS_TYPE_LABELS.items():
+        count = len([student for student in students if weakness_id in student["weaknessTypes"]])
+        if count > 0:
+            weakness_distribution.append({"weaknessTypeId": weakness_id, "label": label, "count": count})
+
+    all_units: list[dict] = []
+    subject_code_by_id = {subject.id: subject.code for subject in db.query(Subject).all()}
+    for student_profile in student_profiles:
+        features = build_student_features(db, student_profile)
+        for unit in features.get("unit_mastery", []):
+            all_units.append(
+                {
+                    "unitId": unit["unit_id"],
+                    "unitName": unit["unit_name"],
+                    "subjectCode": subject_code_by_id.get(unit["subject_id"], ""),
+                    "mastery": unit["mastery"],
+                }
+            )
+    all_units.sort(key=lambda item: item["mastery"])
+
+    recent_strategies: list[dict] = []
+    student_lookup = {item["id"]: item for item in students}
+    for student_profile in student_profiles:
+        strategy = strategies.get(student_profile.id)
+        if not strategy:
+            continue
+        frontend_student_id = f"st{student_profile.id}"
+        student_item = student_lookup.get(frontend_student_id)
+        if not student_item:
+            continue
+        recent_strategies.append(
+            {
+                "studentId": frontend_student_id,
+                "studentName": student_item["name"],
+                "consultPriority": student_item["consultPriority"],
+                "weaknessTypes": student_item["weaknessTypes"],
+                "summary": strategy.natural_language_summary,
+            }
+        )
+
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    recent_strategies.sort(key=lambda item: (priority_order.get(item["consultPriority"], 9), item["studentName"]))
+
+    latest_avg = next((exam["avgScore"] for exam in exams if exam["avgScore"] is not None), None)
+    high_priority_count = len([student for student in students if student["consultPriority"] == "high"])
+
+    return {
+        "stats": [
+            {"label": "Managed students", "value": f"{len(students)}", "sub": "diagnosis coverage"},
+            {"label": "Priority consults", "value": f"{high_priority_count}", "sub": "target gap based"},
+            {"label": "Latest average", "value": f"{round(latest_avg, 1)}" if latest_avg is not None else "-", "sub": "latest exam"},
+            {"label": "Strategies", "value": f"{len(recent_strategies)}", "sub": "stored plans"},
+        ],
+        "consultPriorityStudents": students[:4],
+        "weaknessDistribution": weakness_distribution,
+        "examTrend": [
+            {"name": exam["name"], "averageScore": exam["avgScore"]}
+            for exam in reversed(exams)
+            if exam["avgScore"] is not None
+        ],
+        "weakUnits": all_units[:5],
+        "recentStrategies": recent_strategies[:3],
+    }
+
+
+def get_frontend_student_detail(db: Session, frontend_student_id: str) -> dict | None:
+    student_profile_id = _parse_frontend_student_id(frontend_student_id)
+    student_profile = db.get(StudentProfile, student_profile_id)
+    if not student_profile:
+        return None
+
+    class_groups = {item.id: item for item in db.query(ClassGroup).all()}
+    results_by_student, exams = _student_results_by_student(db)
+    student_results = results_by_student.get(student_profile.id, [])
+    student_item = _build_student_list_item(db, student_profile, class_groups, student_results, exams)
+
+    features = build_student_features(db, student_profile)
+    diagnosis = get_latest_diagnosis(db, student_profile.id)
+    strategy = get_latest_strategy(db, student_profile.id)
+    target_gap = features.get("target_gap", {})
+    preferred_subjects = set(features.get("preferred_subjects", []))
+    subject_code_by_id = {subject.id: subject.code for subject in db.query(Subject).all()}
+
+    subjects: list[dict] = []
+    for subject_code, current_score in features.get("latest_scores", {}).items():
+        subject_meta = FRONTEND_SUBJECT_MAP.get(
+            subject_code,
+            {"subjectId": f"custom-{subject_code.lower()}", "subjectName": subject_code},
+        )
+        subjects.append(
+            {
+                "subjectId": subject_meta["subjectId"],
+                "subjectCode": subject_code,
+                "subjectName": subject_meta["subjectName"],
+                "currentScore": current_score,
+                "targetScore": _recommend_subject_target(current_score, target_gap, subject_code),
+                "trend": features.get("score_trends", {}).get(subject_code, []),
+                "stability": round(features.get("stability_index", 0.0), 4),
+                "universityWeight": float(target_gap.get("subject_weights", {}).get(subject_code, 0.0)),
+                "isPreferred": subject_code in preferred_subjects,
+            }
+        )
+    subjects.sort(key=lambda item: item["currentScore"])
+
+    weak_units = [
+        {
+            "unitId": unit["unit_id"],
+            "unitName": unit["unit_name"],
+            "subjectCode": subject_code_by_id.get(unit["subject_id"], ""),
+            "mastery": unit["mastery"],
+        }
+        for unit in features.get("unit_mastery", [])[:5]
+    ]
+
+    return {
+        "student": student_item,
+        "subjects": subjects,
+        "diagnosis": {
+            "primaryWeaknessType": WEAKNESS_TYPE_TO_FRONTEND.get(diagnosis.primary_weakness_type.value) if diagnosis else None,
+            "weaknessTypes": _build_frontend_weakness_types(diagnosis),
+            "evidence": diagnosis.evidence if diagnosis else [],
+        },
+        "strategy": {
+            "summary": strategy.natural_language_summary if strategy else "",
+            "prioritySubjects": strategy.structured_plan.get("priority_subjects", []) if strategy else [],
+            "priorityUnits": strategy.structured_plan.get("priority_units", []) if strategy else [],
+            "timeAllocation": strategy.structured_plan.get("time_allocation", []) if strategy else [],
+            "coachingPoints": strategy.structured_plan.get("coaching_points", []) if strategy else [],
+            "antiPatterns": strategy.structured_plan.get("anti_patterns", []) if strategy else [],
+        },
+        "weakUnits": weak_units,
+        "targetGap": target_gap,
+    }
+
+
+def get_frontend_student_detail_by_user(db: Session, user_id: int) -> dict | None:
+    student_profile = db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
+    if not student_profile:
+        return None
+    return get_frontend_student_detail(db, f"st{student_profile.id}")
+
+
+def list_frontend_university_policies(db: Session) -> list[dict]:
+    policies = db.query(UniversityScorePolicy).order_by(UniversityScorePolicy.university_name.asc()).all()
+    return [
+        {
+            "id": policy.id,
+            "universityName": policy.university_name,
+            "admissionType": policy.admission_type,
+            "subjectWeights": policy.subject_weights or {},
+            "requiredSubjects": policy.required_subjects or [],
+            "bonusRules": policy.bonus_rules or [],
+            "targetScore": policy.target_score,
+            "notes": policy.notes,
+        }
+        for policy in policies
+    ]
