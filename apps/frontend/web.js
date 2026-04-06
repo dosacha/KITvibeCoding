@@ -3931,10 +3931,19 @@ function CustomTooltip({ active, payload, label }) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
+  const [restoring, setRestoring] = useState(true);
+
+  const getDefaultPageForRole = useCallback((role) => {
+    if (role === "student") return "dashboard";
+    return "dashboard";
+  }, []);
 
   useEffect(() => {
     const restored = getStoredSession();
-    if (!restored?.accessToken) return;
+    if (!restored?.accessToken) {
+      setRestoring(false);
+      return;
+    }
 
     let cancelled = false;
 
@@ -3945,10 +3954,15 @@ export default function App() {
         const nextSession = { accessToken: restored.accessToken, user: response.user };
         storeSession(nextSession);
         setSession(nextSession);
+        setCurrentPage(getDefaultPageForRole(response.user.role));
       } catch {
         clearStoredSession();
         if (!cancelled) {
           setSession(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setRestoring(false);
         }
       }
     }
@@ -3957,11 +3971,11 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [getDefaultPageForRole]);
 
   const handleLogin = (nextSession) => {
     setSession(nextSession);
-    setCurrentPage("dashboard");
+    setCurrentPage(getDefaultPageForRole(nextSession.user.role));
   };
 
   const handleLogout = () => {
@@ -3974,6 +3988,19 @@ export default function App() {
     setCurrentPage(page);
   };
 
+  useEffect(() => {
+    if (!session?.user) return;
+    const userRole = session.user.role;
+    const allowedPages = userRole === "student"
+      ? new Set(["dashboard", "my-strategy", "my-exams"])
+      : new Set(["dashboard", "students", "exams", "universities"]);
+
+    if (userRole !== "student" && currentPage.startsWith("student-")) return;
+    if (!allowedPages.has(currentPage)) {
+      setCurrentPage(getDefaultPageForRole(userRole));
+    }
+  }, [currentPage, getDefaultPageForRole, session]);
+
   // Google Fonts for Pretendard
   useEffect(() => {
     const link = document.createElement("link");
@@ -3981,6 +4008,28 @@ export default function App() {
     link.href = "https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css";
     document.head.appendChild(link);
   }, []);
+
+  if (restoring) {
+    return (
+      <div style={{
+        ...baseStyles.page,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        background: `linear-gradient(135deg, ${theme.colors.slate50} 0%, ${theme.colors.primary50} 50%, ${theme.colors.ai50} 100%)`,
+      }}>
+        <div style={{ ...baseStyles.card, width: "100%", maxWidth: 420, textAlign: "center" }}>
+          <div style={{ display: "inline-flex", marginBottom: 16 }}>
+            <AIBadge />
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: theme.colors.slate900, marginBottom: 8 }}>Restoring session</div>
+          <div style={{ fontSize: 14, color: theme.colors.slate500, marginBottom: 20 }}>Checking saved login information and role access.</div>
+          <LoadingSkeleton lines={3} />
+        </div>
+      </div>
+    );
+  }
 
   if (!session?.user) {
     return <LoginPage onLogin={handleLogin} />;
