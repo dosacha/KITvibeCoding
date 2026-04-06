@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AuthPanel } from "../components/auth-panel";
 
 export const metadata: Metadata = {
   title: "UnitFlow AI",
@@ -12,10 +13,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ko">
       <body>
         <div className="page-shell">
-          <div className="nav-links">
-            <Link href="/">Overview</Link>
-            <Link href="/instructor">Instructor Dashboard</Link>
-            <Link href="/student">Student Dashboard</Link>
+          <div className="layout-top">
+            <div className="nav-links">
+              <Link href="/">Overview</Link>
+              <Link href="/login">Login</Link>
+              <Link href="/instructor">Instructor Dashboard</Link>
+              <Link href="/student">Student Dashboard</Link>
+            </div>
+            <AuthPanel />
           </div>
           {children}
         </div>
@@ -23,4 +28,3 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     </html>
   );
 }
-

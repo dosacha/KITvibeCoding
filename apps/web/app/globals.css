@@ -36,6 +36,11 @@ a {
   padding: 32px 20px 60px;
 }
 
+.layout-top {
+  display: grid;
+  gap: 16px;
+}
+
 .hero {
   display: grid;
   gap: 16px;
@@ -113,6 +118,112 @@ a {
   background: rgba(255, 253, 248, 0.7);
 }
 
+.auth-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.85);
+}
+
+.auth-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.auth-copy span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ghost-button,
+.primary-button,
+.account-preset {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  font: inherit;
+}
+
+.ghost-button {
+  padding: 10px 14px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.primary-button {
+  padding: 12px 16px;
+  background: var(--accent);
+  color: #fff7ef;
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.form-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdfa;
+  font: inherit;
+  color: var(--ink);
+}
+
+.error-box,
+.info-box {
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+}
+
+.error-box {
+  border: 1px solid #d8a198;
+  background: #f8e6e0;
+  color: #7d2c1f;
+}
+
+.info-box {
+  border: 1px solid #d8c8a1;
+  background: #f8f1e0;
+  color: #70541d;
+}
+
+.account-preset {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  background: #fffdfa;
+  cursor: pointer;
+}
+
+.account-preset span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .list {
   margin: 0;
   padding-left: 18px;
@@ -132,5 +243,9 @@ a {
   .hero {
     padding: 20px;
   }
-}
 
+  .auth-bar {
+    align-items: start;
+    flex-direction: column;
+  }
+}
