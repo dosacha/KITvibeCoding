@@ -3150,6 +3150,333 @@ function UniversityPolicyPage() {
   );
 }
 
+function StudentListPage({ onNavigate }) {
+  const auth = useAuth();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterClass, setFilterClass] = useState("all");
+  const [students, setStudents] = useState(STUDENTS);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStudents() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/students", { token: auth.accessToken });
+        if (cancelled) return;
+        setStudents(response.students || STUDENTS);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setStudents(STUDENTS);
+        setLoadError(error instanceof Error ? error.message : "Student list request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const classOptions = ["all", ...new Set(students.map((student) => student.classGroup).filter(Boolean))];
+  const filtered = students.filter((student) => {
+    const keyword = searchTerm.trim().toLowerCase();
+    const targetUniv = (student.targetUniv || "").toLowerCase();
+    const matchSearch = !keyword || student.name.toLowerCase().includes(keyword) || targetUniv.includes(keyword);
+    const matchClass = filterClass === "all" || student.classGroup === filterClass;
+    return matchSearch && matchClass;
+  });
+
+  return (
+    <div>
+      <DemoHelper text="Student list connected to the live frontend adapter API." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          Student list API request failed. Fallback data is being shown.
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <Search size={16} color={theme.colors.slate400} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by student or target university"
+            style={{
+              width: "100%",
+              padding: "10px 14px 10px 38px",
+              borderRadius: theme.radius.lg,
+              border: `1px solid ${theme.colors.slate200}`,
+              fontSize: 14,
+              outline: "none",
+              fontFamily: fontStack,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <select
+          value={filterClass}
+          onChange={(e) => setFilterClass(e.target.value)}
+          style={{
+            padding: "10px 14px",
+            borderRadius: theme.radius.lg,
+            border: `1px solid ${theme.colors.slate200}`,
+            fontSize: 14,
+            fontFamily: fontStack,
+            background: theme.colors.white,
+            color: theme.colors.slate700,
+            cursor: "pointer",
+          }}
+        >
+          {classOptions.map((className) => (
+            <option key={className} value={className}>
+              {className === "all" ? "All classes" : className}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ ...baseStyles.card, padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: theme.colors.slate50, borderBottom: `1px solid ${theme.colors.slate200}` }}>
+              {["Student", "Class", "Target", "Latest score", "Gap", "Weakness", "Priority"].map((header) => (
+                <th
+                  key={header}
+                  style={{
+                    padding: "12px 16px",
+                    textAlign: "left",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: theme.colors.slate500,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((student) => (
+              <tr
+                key={student.id}
+                onClick={() => onNavigate(`student-${student.id}`)}
+                style={{ borderBottom: `1px solid ${theme.colors.slate100}`, cursor: "pointer", transition: "background 0.1s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = theme.colors.slate50; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <td style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: theme.radius.full,
+                      background: theme.colors.primary50,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 700,
+                      color: theme.colors.primary600,
+                      fontSize: 14,
+                    }}>
+                      {student.name?.[0] || "S"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: theme.colors.slate800 }}>{student.name}</div>
+                      <div style={{ fontSize: 12, color: theme.colors.slate400 }}>{student.grade}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{student.classGroup || "-"}</td>
+                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{student.targetUniv || "Not set"}</td>
+                <td style={{ padding: "14px 16px", fontSize: 14, fontWeight: 600, color: theme.colors.slate800 }}>
+                  {student.recentExams[student.recentExams.length - 1]?.totalScore ?? "-"}
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: student.gapScore > 20 ? theme.colors.danger500 : student.gapScore > 10 ? theme.colors.accent500 : theme.colors.success500,
+                  }}>
+                    {student.gapScore}
+                  </span>
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {student.weaknessTypes.slice(0, 2).map((typeId) => <WeaknessBadge key={typeId} typeId={typeId} size="sm" />)}
+                    {student.weaknessTypes.length > 2 && <span style={{ fontSize: 11, color: theme.colors.slate400 }}>+{student.weaknessTypes.length - 2}</span>}
+                  </div>
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <PriorityBadge priority={student.consultPriority} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && <EmptyState icon={Search} title="No matches" description="Try another search or class filter." />}
+      </div>
+    </div>
+  );
+}
+
+function ExamManagementPage() {
+  const auth = useAuth();
+  const [exams, setExams] = useState(EXAMS);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExams() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/exams", { token: auth.accessToken });
+        if (cancelled) return;
+        setExams(response.exams || EXAMS);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setExams(EXAMS);
+        setLoadError(error instanceof Error ? error.message : "Exam list request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadExams();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const handleCreateExam = async () => {
+    if (!auth?.accessToken || auth.user.role === "student") return;
+    setCreating(true);
+    try {
+      const created = await apiRequest("/frontend/exams", {
+        method: "POST",
+        token: auth.accessToken,
+        body: {
+          academy_id: 1,
+          subject_id: 1,
+          name: `Quick exam ${new Date().toISOString().slice(0, 10)}`,
+          exam_date: new Date().toISOString().slice(0, 10),
+          total_score: 100,
+        },
+      });
+      setExams((prev) => [created, ...prev]);
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Exam creation failed");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const statusMeta = (status) => {
+    const normalized = String(status || "").toLowerCase();
+    const done = normalized === "completed" || normalized === "complete";
+    return {
+      label: done ? "Completed" : "Scheduled",
+      background: done ? theme.colors.success50 : theme.colors.accent50,
+      color: done ? theme.colors.success600 : theme.colors.accent500,
+      border: done ? theme.colors.success500 : theme.colors.accent400,
+      icon: done ? <CheckCircle size={12} /> : <Clock size={12} />,
+    };
+  };
+
+  return (
+    <div>
+      <DemoHelper text="Exam management connected to the live frontend adapter API." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          Exam API request failed. Fallback data is being shown.
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div />
+        <button style={baseStyles.btnPrimary} onClick={handleCreateExam} disabled={creating || auth?.user?.role === "student"}>
+          <Plus size={16} /> {creating ? "Creating..." : "Create quick exam"}
+        </button>
+      </div>
+
+      <div style={{ ...baseStyles.card, padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: theme.colors.slate50, borderBottom: `1px solid ${theme.colors.slate200}` }}>
+              {["Exam", "Date", "Subject", "Questions", "Participants", "Average", "Status"].map((header) => (
+                <th key={header} style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: theme.colors.slate500 }}>
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {exams.map((exam) => {
+              const status = statusMeta(exam.status);
+              return (
+                <tr
+                  key={exam.id}
+                  style={{ borderBottom: `1px solid ${theme.colors.slate100}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = theme.colors.slate50; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <td style={{ padding: "14px 16px", fontWeight: 600, fontSize: 14, color: theme.colors.slate800 }}>{exam.name}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.date}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.subject}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.questionCount}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.participantCount}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 14, fontWeight: 600, color: theme.colors.slate800 }}>
+                    {exam.avgScore ?? "-"}
+                  </td>
+                  <td style={{ padding: "14px 16px" }}>
+                    <span style={{
+                      ...baseStyles.badge,
+                      background: status.background,
+                      color: status.color,
+                      border: `1px solid ${status.border}22`,
+                    }}>
+                      {status.icon}
+                      {status.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
