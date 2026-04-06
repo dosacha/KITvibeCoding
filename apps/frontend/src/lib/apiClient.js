@@ -39,7 +39,10 @@ export const apiClient = {
   getExamCatalog: (token) => request("/exams", { token }),
   createExam: (token, payload) => request("/frontend/exams", { method: "POST", token, body: payload }),
   getMetadata: (token) => request("/frontend/metadata", { token }),
-  getUniversities: (token) => request("/frontend/universities", { token }),
+  getUniversities: (token) => request("/universities/policies", { token }),
+  createUniversityPolicy: (token, payload) => request("/universities/policies", { method: "POST", token, body: payload }),
+  updateUniversityPolicy: (token, policyId, payload) =>
+    request(`/universities/policies/${policyId}`, { method: "PUT", token, body: payload }),
   updateExam: (token, examId, payload) => request(`/exams/${examId}`, { method: "PUT", token, body: payload }),
   getSubjectUnits: (token, subjectId) => request(`/subjects/${subjectId}/units`, { token }),
   getExamQuestions: (token, examId) => request(`/exams/${examId}/questions`, { token }),

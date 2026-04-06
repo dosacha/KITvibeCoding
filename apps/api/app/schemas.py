@@ -69,6 +69,28 @@ class UniversityPolicyRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UniversityPolicyCreate(BaseModel):
+    university_name: str = Field(min_length=1, max_length=120)
+    admission_type: str = Field(min_length=1, max_length=60)
+    subject_weights: dict[str, float] = Field(default_factory=dict)
+    required_subjects: list[str] = Field(default_factory=list)
+    bonus_rules: list[dict[str, Any]] = Field(default_factory=list)
+    grade_conversion_rules: dict[str, Any] = Field(default_factory=dict)
+    target_score: float = Field(gt=0, le=1000)
+    notes: str | None = None
+
+
+class UniversityPolicyUpdate(BaseModel):
+    university_name: str | None = Field(default=None, min_length=1, max_length=120)
+    admission_type: str | None = Field(default=None, min_length=1, max_length=60)
+    subject_weights: dict[str, float] | None = None
+    required_subjects: list[str] | None = None
+    bonus_rules: list[dict[str, Any]] | None = None
+    grade_conversion_rules: dict[str, Any] | None = None
+    target_score: float | None = Field(default=None, gt=0, le=1000)
+    notes: str | None = None
+
+
 class StudentAnalyticsRead(BaseModel):
     student_profile_id: int
     latest_scores: dict[str, float]
