@@ -57,6 +57,7 @@
 
 - `python -m compileall app tests`
 - `node --check apps/frontend/web.js`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\demo_smoke_check.ps1`
 
 ### 테스트 보강 항목
 

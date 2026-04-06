@@ -167,6 +167,12 @@ python -m compileall app tests
 node --check apps/frontend/web.js
 ```
 
+데모 전 빠른 점검:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\demo_smoke_check.ps1
+```
+
 포함된 테스트 범위:
 
 - 진단 엔진
