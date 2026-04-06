@@ -4050,6 +4050,893 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
+function UniversityPolicyPage() {
+  const auth = useAuth();
+  const [selectedUniv, setSelectedUniv] = useState(null);
+  const [universities, setUniversities] = useState(() => buildMockUniversityPolicies().universities);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUniversities() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/universities", { token: auth.accessToken });
+        if (cancelled) return;
+        setUniversities(response.universities || buildMockUniversityPolicies().universities);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setUniversities(buildMockUniversityPolicies().universities);
+        setLoadError(error instanceof Error ? error.message : "대학 정책 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadUniversities();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  return (
+    <div>
+      <DemoHelper text="대학 정책 카드와 백엔드 정책 데이터를 실제로 연동한 화면이다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          대학 정책 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+      {loading && <div style={{ ...baseStyles.card, marginBottom: 16 }}><LoadingSkeleton lines={4} /></div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16 }}>
+        {universities.map((university) => {
+          const isSelected = selectedUniv === university.id;
+          return (
+            <div
+              key={university.id}
+              onClick={() => setSelectedUniv(isSelected ? null : university.id)}
+              style={{
+                ...baseStyles.card,
+                cursor: "pointer",
+                border: `1px solid ${isSelected ? theme.colors.primary500 + "50" : theme.colors.slate200}`,
+                background: isSelected ? theme.colors.primary50 + "40" : theme.colors.white,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: theme.radius.lg,
+                  background: theme.colors.primary50,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}>
+                  <School size={20} color={theme.colors.primary600} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: theme.colors.slate800, margin: 0 }}>{university.universityName}</h3>
+                  <div style={{ fontSize: 12, color: theme.colors.slate500 }}>{university.admissionType}</div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: theme.colors.slate500, marginBottom: 8 }}>과목 반영 비율</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {Object.entries(university.subjectWeights || {}).map(([subjectCode, weight]) => (
+                    <div key={subjectCode} style={{
+                      padding: "6px 10px",
+                      borderRadius: theme.radius.md,
+                      background: `${SUBJECT_CODE_META[subjectCode]?.color || theme.colors.primary500}10`,
+                      border: `1px solid ${(SUBJECT_CODE_META[subjectCode]?.color || theme.colors.primary500)}20`,
+                      fontSize: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}>
+                      <span style={{ fontWeight: 600, color: SUBJECT_CODE_META[subjectCode]?.color || theme.colors.primary500 }}>
+                        {SUBJECT_CODE_META[subjectCode]?.label || subjectCode} {Math.round(Number(weight) * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {isSelected && (
+                <div style={{ borderTop: `1px solid ${theme.colors.slate200}`, paddingTop: 14, marginTop: 4 }}>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.colors.slate500, marginBottom: 4 }}>필수 반영 과목</div>
+                    <div style={{ fontSize: 13, color: theme.colors.slate700 }}>{(university.requiredSubjects || []).join(", ") || "-"}</div>
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.colors.slate500, marginBottom: 4 }}>가산 규칙</div>
+                    <div style={{ fontSize: 13, color: theme.colors.slate700 }}>
+                      {(university.bonusRules || []).map((rule) => rule.text || JSON.stringify(rule)).join(", ") || "-"}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.colors.slate500, marginBottom: 4 }}>목표 점수</div>
+                    <div style={{ fontSize: 13, color: theme.colors.slate700 }}>{university.targetScore}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.colors.slate500, marginBottom: 4 }}>비고</div>
+                    <div style={{ fontSize: 13, color: theme.colors.slate700 }}>{university.notes || "-"}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StudentListPage({ onNavigate }) {
+  const auth = useAuth();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterClass, setFilterClass] = useState("all");
+  const [students, setStudents] = useState(STUDENTS);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStudents() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/students", { token: auth.accessToken });
+        if (cancelled) return;
+        setStudents(response.students || STUDENTS);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setStudents(STUDENTS);
+        setLoadError(error instanceof Error ? error.message : "학생 목록 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const classOptions = ["all", ...new Set(students.map((student) => student.classGroup).filter(Boolean))];
+  const filtered = students.filter((student) => {
+    const keyword = searchTerm.trim().toLowerCase();
+    const targetUniv = (student.targetUniv || "").toLowerCase();
+    const matchSearch = !keyword || student.name.toLowerCase().includes(keyword) || targetUniv.includes(keyword);
+    const matchClass = filterClass === "all" || student.classGroup === filterClass;
+    return matchSearch && matchClass;
+  });
+
+  return (
+    <div>
+      <DemoHelper text="학생 목록과 상담 우선순위를 실제 백엔드 데이터로 불러오는 화면이다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          학생 목록 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <Search size={16} color={theme.colors.slate400} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="학생명 또는 목표 대학 검색"
+            style={{
+              width: "100%",
+              padding: "10px 14px 10px 38px",
+              borderRadius: theme.radius.lg,
+              border: `1px solid ${theme.colors.slate200}`,
+              fontSize: 14,
+              outline: "none",
+              fontFamily: fontStack,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <select
+          value={filterClass}
+          onChange={(e) => setFilterClass(e.target.value)}
+          style={{
+            padding: "10px 14px",
+            borderRadius: theme.radius.lg,
+            border: `1px solid ${theme.colors.slate200}`,
+            fontSize: 14,
+            fontFamily: fontStack,
+            background: theme.colors.white,
+            color: theme.colors.slate700,
+            cursor: "pointer",
+          }}
+        >
+          {classOptions.map((className) => (
+            <option key={className} value={className}>
+              {className === "all" ? "전체 반" : className}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ ...baseStyles.card, padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: theme.colors.slate50, borderBottom: `1px solid ${theme.colors.slate200}` }}>
+              {["학생", "반", "목표 대학", "최근 점수", "격차", "취약 유형", "상담 우선도"].map((header) => (
+                <th
+                  key={header}
+                  style={{
+                    padding: "12px 16px",
+                    textAlign: "left",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: theme.colors.slate500,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((student) => (
+              <tr
+                key={student.id}
+                onClick={() => onNavigate(`student-${student.id}`)}
+                style={{ borderBottom: `1px solid ${theme.colors.slate100}`, cursor: "pointer", transition: "background 0.1s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = theme.colors.slate50; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <td style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: theme.radius.full,
+                      background: theme.colors.primary50,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 700,
+                      color: theme.colors.primary600,
+                      fontSize: 14,
+                    }}>
+                      {student.name?.[0] || "학"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: theme.colors.slate800 }}>{student.name}</div>
+                      <div style={{ fontSize: 12, color: theme.colors.slate400 }}>{student.grade}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{student.classGroup || "-"}</td>
+                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{student.targetUniv || "미설정"}</td>
+                <td style={{ padding: "14px 16px", fontSize: 14, fontWeight: 600, color: theme.colors.slate800 }}>
+                  {student.recentExams[student.recentExams.length - 1]?.totalScore ?? "-"}
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: student.gapScore > 20 ? theme.colors.danger500 : student.gapScore > 10 ? theme.colors.accent500 : theme.colors.success500,
+                  }}>
+                    {student.gapScore}
+                  </span>
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {student.weaknessTypes.slice(0, 2).map((typeId) => <WeaknessBadge key={typeId} typeId={typeId} size="sm" />)}
+                    {student.weaknessTypes.length > 2 && <span style={{ fontSize: 11, color: theme.colors.slate400 }}>+{student.weaknessTypes.length - 2}</span>}
+                  </div>
+                </td>
+                <td style={{ padding: "14px 16px" }}>
+                  <PriorityBadge priority={student.consultPriority} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && <EmptyState icon={Search} title="검색 결과 없음" description="검색어 또는 반 필터 확인 필요." />}
+      </div>
+    </div>
+  );
+}
+
+function WeaknessBadge({ typeId, size = "md" }) {
+  const meta = {
+    wt1: { label: "개념 결손", color: "#EF4444", bgColor: "#FEE2E2", icon: "개" },
+    wt2: { label: "계산 실수", color: "#F97316", bgColor: "#FFEDD5", icon: "계" },
+    wt3: { label: "시간 압박", color: "#FBBF24", bgColor: "#FEF3C7", icon: "시" },
+    wt4: { label: "선행 결손", color: "#8B5CF6", bgColor: "#EDE9FE", icon: "선" },
+    wt5: { label: "유형 편중", color: "#EC4899", bgColor: "#FCE7F3", icon: "유" },
+    wt6: { label: "변동성 높음", color: "#6366F1", bgColor: "#E0E7FF", icon: "변" },
+  }[typeId];
+  if (!meta) return null;
+  const isSmall = size === "sm";
+  return (
+    <span style={{
+      ...baseStyles.badge,
+      background: meta.bgColor,
+      color: meta.color,
+      fontSize: isSmall ? 11 : 12,
+      padding: isSmall ? "2px 8px" : "4px 12px",
+      border: `1px solid ${meta.color}22`,
+    }}>
+      <span style={{ fontSize: isSmall ? 12 : 14 }}>{meta.icon}</span>
+      {meta.label}
+    </span>
+  );
+}
+
+function PriorityBadge({ priority }) {
+  const map = {
+    high: { bg: theme.colors.danger50, color: theme.colors.danger500, border: `${theme.colors.danger500}22`, text: "상담 우선" },
+    medium: { bg: theme.colors.accent50, color: theme.colors.accent500, border: `${theme.colors.accent500}22`, text: "관찰 필요" },
+    low: { bg: theme.colors.success50, color: theme.colors.success500, border: `${theme.colors.success500}22`, text: "안정" },
+  };
+  const current = map[priority] || map.low;
+  return (
+    <span style={{ ...baseStyles.badge, background: current.bg, color: current.color, border: `1px solid ${current.border}` }}>
+      {priority === "high" && <AlertTriangle size={12} />}
+      {priority === "medium" && <Eye size={12} />}
+      {priority === "low" && <CheckCircle size={12} />}
+      {current.text}
+    </span>
+  );
+}
+
+function LoginPage({ onLogin }) {
+  const accounts = [
+    { email: "admin@unitflow.ai", password: "demo1234", role: "admin", name: "관리자" },
+    { email: "instructor@unitflow.ai", password: "demo1234", role: "instructor", name: "김민수 선생님" },
+    { email: "student@unitflow.ai", password: "demo1234", role: "student", name: "이서연 학생" },
+  ];
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [hoveredDemo, setHoveredDemo] = useState(null);
+
+  const submitLogin = async (nextEmail, nextPassword) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiRequest("/frontend/login", {
+        method: "POST",
+        body: { email: nextEmail, password: nextPassword },
+      });
+      const session = { accessToken: response.accessToken, user: response.user };
+      storeSession(session);
+      onLogin(session);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "로그인 실패");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      ...baseStyles.page,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "100vh",
+      background: `linear-gradient(135deg, ${theme.colors.slate50} 0%, ${theme.colors.primary50} 50%, ${theme.colors.ai50} 100%)`,
+    }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: 440, padding: "0 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: theme.radius.xl,
+              background: `linear-gradient(135deg, ${theme.colors.primary600}, ${theme.colors.ai500})`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: `0 4px 16px ${theme.colors.primary600}40`,
+            }}>
+              <Brain size={26} color="#fff" />
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 26, fontWeight: 800, color: theme.colors.slate900, letterSpacing: -0.5 }}>UnitFlow</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: theme.colors.primary600, letterSpacing: 2, textTransform: "uppercase" }}>AI Learning Strategy</div>
+            </div>
+          </div>
+          <p style={{ fontSize: 14, color: theme.colors.slate500, marginTop: 12 }}>
+            설명 가능한 진단과 목표 기반 학습 전략 생성
+          </p>
+        </div>
+
+        <div style={{ ...baseStyles.card, padding: "32px", boxShadow: theme.shadow.xl, borderRadius: theme.radius["2xl"] }}>
+          <form onSubmit={(e) => { e.preventDefault(); submitLogin(email, password); }}>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: theme.colors.slate700, marginBottom: 6 }}>이메일</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                placeholder="이메일 입력"
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: theme.radius.lg,
+                  border: `1px solid ${error ? theme.colors.danger500 : theme.colors.slate200}`,
+                  fontSize: 14,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  fontFamily: fontStack,
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: theme.colors.slate700, marginBottom: 6 }}>비밀번호</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                placeholder="비밀번호 입력"
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: theme.radius.lg,
+                  border: `1px solid ${error ? theme.colors.danger500 : theme.colors.slate200}`,
+                  fontSize: 14,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  fontFamily: fontStack,
+                }}
+              />
+            </div>
+
+            {error && <div style={{ marginBottom: 16, fontSize: 13, color: theme.colors.danger500 }}>{error}</div>}
+
+            <button type="submit" style={{ ...baseStyles.btnPrimary, width: "100%", justifyContent: "center", marginBottom: 18 }} disabled={loading}>
+              {loading ? "로그인 중..." : "로그인"}
+            </button>
+          </form>
+
+          <div style={{ borderTop: `1px solid ${theme.colors.slate100}`, paddingTop: 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.slate500, marginBottom: 10 }}>데모 계정</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {accounts.map((account, index) => (
+                <button
+                  key={account.email}
+                  onClick={() => submitLogin(account.email, account.password)}
+                  onMouseEnter={() => setHoveredDemo(index)}
+                  onMouseLeave={() => setHoveredDemo(null)}
+                  style={{
+                    ...baseStyles.btnSecondary,
+                    width: "100%",
+                    justifyContent: "space-between",
+                    background: hoveredDemo === index ? theme.colors.slate50 : theme.colors.white,
+                  }}
+                >
+                  <span>{account.name}</span>
+                  <span style={{ fontSize: 12, color: theme.colors.slate500 }}>{account.role === "admin" ? "관리자" : account.role === "instructor" ? "강사" : "학생"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const menuItems = useMemo(() => {
+    const base = [{ id: "dashboard", label: "대시보드", icon: Home }];
+    if (user.role === "instructor" || user.role === "admin") {
+      base.push(
+        { id: "students", label: "학생", icon: Users },
+        { id: "exams", label: "시험", icon: FileText },
+        { id: "universities", label: "대학 정책", icon: School },
+      );
+    }
+    if (user.role === "student") {
+      base.push(
+        { id: "my-strategy", label: "나의 전략", icon: Target },
+        { id: "my-exams", label: "나의 시험", icon: FileText },
+      );
+    }
+    return base;
+  }, [user.role]);
+
+  const roleInfo = {
+    instructor: { label: "강사", color: theme.colors.primary600, bg: theme.colors.primary50 },
+    student: { label: "학생", color: theme.colors.success600, bg: theme.colors.success50 },
+    admin: { label: "관리자", color: theme.colors.ai500, bg: theme.colors.ai50 },
+  }[user.role];
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: theme.colors.slate50 }}>
+      <aside style={{
+        width: sidebarCollapsed ? 88 : 260,
+        transition: "width 0.2s ease",
+        background: theme.colors.white,
+        borderRight: `1px solid ${theme.colors.slate200}`,
+        padding: 20,
+        boxSizing: "border-box",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{
+              width: 42,
+              height: 42,
+              borderRadius: theme.radius.xl,
+              background: `linear-gradient(135deg, ${theme.colors.primary600}, ${theme.colors.ai500})`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <Brain size={22} color="#fff" />
+            </div>
+            {!sidebarCollapsed && (
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: theme.colors.slate900 }}>UnitFlow</div>
+                <div style={{ fontSize: 11, color: theme.colors.slate500 }}>AI 학습 전략</div>
+              </div>
+            )}
+          </div>
+          <button onClick={() => setSidebarCollapsed((prev) => !prev)} style={{ ...baseStyles.iconBtn, width: 34, height: 34 }}>
+            <Menu size={16} />
+          </button>
+        </div>
+
+        <div style={{ marginBottom: 24, padding: 14, borderRadius: theme.radius.xl, background: roleInfo.bg }}>
+          <div style={{ fontSize: 12, color: theme.colors.slate500, marginBottom: 4 }}>현재 사용자</div>
+          {!sidebarCollapsed && <div style={{ fontWeight: 700, color: theme.colors.slate900, marginBottom: 6 }}>{user.name}</div>}
+          <span style={{ ...baseStyles.badge, background: theme.colors.white, color: roleInfo.color }}>{roleInfo.label}</span>
+        </div>
+
+        <nav style={{ display: "grid", gap: 8 }}>
+          {menuItems.map((item) => {
+            const active = currentPage === item.id || (item.id === "students" && currentPage.startsWith("student-"));
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCurrentPage(item.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  width: "100%",
+                  padding: sidebarCollapsed ? "12px" : "12px 14px",
+                  borderRadius: theme.radius.xl,
+                  border: "none",
+                  background: active ? theme.colors.primary50 : "transparent",
+                  color: active ? theme.colors.primary600 : theme.colors.slate600,
+                  fontWeight: active ? 700 : 600,
+                  cursor: "pointer",
+                  justifyContent: sidebarCollapsed ? "center" : "flex-start",
+                }}
+              >
+                <Icon size={18} />
+                {!sidebarCollapsed && <span>{item.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div style={{ marginTop: 24 }}>
+          <button onClick={onLogout} style={{ ...baseStyles.btnSecondary, width: "100%", justifyContent: "center" }}>
+            <LogOut size={16} />
+            {!sidebarCollapsed && "로그아웃"}
+          </button>
+        </div>
+      </aside>
+
+      <main style={{ flex: 1, padding: 28 }}>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 12, color: theme.colors.slate500, marginBottom: 6 }}>{roleInfo.label}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: theme.colors.slate900 }}>
+            {{
+              dashboard: user.role === "student" ? "나의 학습 현황" : "대시보드",
+              students: "학생 목록",
+              exams: "시험 관리",
+              universities: "대학 정책",
+              "my-strategy": "나의 전략",
+              "my-exams": "나의 시험",
+            }[currentPage] || (currentPage.startsWith("student-") ? "학생 상세" : "대시보드")}
+          </div>
+        </div>
+        {children}
+      </main>
+    </div>
+  );
+}
+
+function ExamManagementPage() {
+  const auth = useAuth();
+  const [exams, setExams] = useState(EXAMS);
+  const [metadata, setMetadata] = useState({ academies: [], subjects: [] });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [createMessage, setCreateMessage] = useState("");
+  const [form, setForm] = useState({
+    academy_id: 1,
+    subject_id: 1,
+    name: "",
+    exam_date: new Date().toISOString().slice(0, 10),
+    total_score: 100,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExamsAndMetadata() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const [examResponse, metadataResponse] = await Promise.all([
+          apiRequest("/frontend/exams", { token: auth.accessToken }),
+          apiRequest("/frontend/metadata", { token: auth.accessToken }),
+        ]);
+        if (cancelled) return;
+        setExams(examResponse.exams || EXAMS);
+        setMetadata(metadataResponse || { academies: [], subjects: [] });
+        setForm((prev) => ({
+          ...prev,
+          academy_id: metadataResponse?.academies?.[0]?.id || prev.academy_id,
+          subject_id: metadataResponse?.subjects?.[0]?.id || prev.subject_id,
+          name: prev.name || `빠른 시험 ${new Date().toISOString().slice(0, 10)}`,
+        }));
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setExams(EXAMS);
+        setMetadata({ academies: [], subjects: [] });
+        setLoadError(error instanceof Error ? error.message : "시험 데이터 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadExamsAndMetadata();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const canCreateExam = Boolean(
+    form.name.trim() &&
+    form.exam_date &&
+    Number(form.academy_id) > 0 &&
+    Number(form.subject_id) > 0 &&
+    Number(form.total_score) > 0
+  );
+
+  const handleCreateExam = async () => {
+    if (!auth?.accessToken || auth.user.role === "student") return;
+    if (!form.name.trim()) {
+      setFormError("시험명 입력 필요.");
+      setCreateMessage("");
+      return;
+    }
+    if (!form.exam_date) {
+      setFormError("시험일 입력 필요.");
+      setCreateMessage("");
+      return;
+    }
+    if (Number(form.total_score) <= 0) {
+      setFormError("총점은 0보다 커야 함.");
+      setCreateMessage("");
+      return;
+    }
+    setCreating(true);
+    setFormError("");
+    setCreateMessage("");
+    try {
+      const created = await apiRequest("/frontend/exams", {
+        method: "POST",
+        token: auth.accessToken,
+        body: {
+          academy_id: Number(form.academy_id),
+          subject_id: Number(form.subject_id),
+          name: form.name || `빠른 시험 ${new Date().toISOString().slice(0, 10)}`,
+          exam_date: form.exam_date,
+          total_score: Number(form.total_score),
+        },
+      });
+      setExams((prev) => [created, ...prev]);
+      setForm((prev) => ({
+        ...prev,
+        name: `빠른 시험 ${new Date().toISOString().slice(0, 10)}`,
+      }));
+      setLoadError("");
+      setCreateMessage("시험 등록 완료.");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "시험 등록 실패");
+      setFormError("시험 등록 실패. 입력값과 권한 확인 필요.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const statusMeta = (status) => {
+    const normalized = String(status || "").toLowerCase();
+    const done = normalized === "completed" || normalized === "complete";
+    return {
+      label: done ? "완료" : "예정",
+      background: done ? theme.colors.success50 : theme.colors.accent50,
+      color: done ? theme.colors.success600 : theme.colors.accent500,
+      border: done ? theme.colors.success500 : theme.colors.accent400,
+      icon: done ? <CheckCircle size={12} /> : <Clock size={12} />,
+    };
+  };
+
+  return (
+    <div>
+      <DemoHelper text="시험 등록과 시험 목록을 실제 백엔드와 연동한 관리 화면이다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          시험 데이터 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+      {formError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          {formError}
+        </div>
+      )}
+      {createMessage && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.success50, color: theme.colors.success600 }}>
+          {createMessage}
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 10, flex: 1, marginRight: 16 }}>
+          <input
+            value={form.name}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, name: e.target.value }));
+              setFormError("");
+              setCreateMessage("");
+            }}
+            placeholder="시험명"
+            style={{ padding: "10px 12px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate200}`, fontFamily: fontStack }}
+          />
+          <select
+            value={form.academy_id}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, academy_id: Number(e.target.value) }));
+              setFormError("");
+              setCreateMessage("");
+            }}
+            style={{ padding: "10px 12px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate200}`, fontFamily: fontStack }}
+          >
+            {(metadata.academies.length ? metadata.academies : [{ id: 1, name: "기본 학원" }]).map((academy) => (
+              <option key={academy.id} value={academy.id}>{academy.name}</option>
+            ))}
+          </select>
+          <select
+            value={form.subject_id}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, subject_id: Number(e.target.value) }));
+              setFormError("");
+              setCreateMessage("");
+            }}
+            style={{ padding: "10px 12px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate200}`, fontFamily: fontStack }}
+          >
+            {(metadata.subjects.length ? metadata.subjects : [{ id: 1, code: "GEN", name: "공통" }]).map((subject) => (
+              <option key={subject.id} value={subject.id}>{subject.name}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={form.exam_date}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, exam_date: e.target.value }));
+              setFormError("");
+              setCreateMessage("");
+            }}
+            style={{ padding: "10px 12px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate200}`, fontFamily: fontStack }}
+          />
+          <input
+            type="number"
+            min="1"
+            max="1000"
+            value={form.total_score}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, total_score: e.target.value }));
+              setFormError("");
+              setCreateMessage("");
+            }}
+            placeholder="총점"
+            style={{ padding: "10px 12px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate200}`, fontFamily: fontStack }}
+          />
+        </div>
+        <button style={baseStyles.btnPrimary} onClick={handleCreateExam} disabled={creating || loading || auth?.user?.role === "student" || !canCreateExam}>
+          <Plus size={16} /> {creating ? "등록 중..." : "빠른 시험 등록"}
+        </button>
+      </div>
+
+      <div style={{ ...baseStyles.card, padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: theme.colors.slate50, borderBottom: `1px solid ${theme.colors.slate200}` }}>
+              {["시험", "일자", "과목", "문항 수", "응시 인원", "평균", "상태"].map((header) => (
+                <th key={header} style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: theme.colors.slate500 }}>
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {exams.map((exam) => {
+              const status = statusMeta(exam.status);
+              return (
+                <tr
+                  key={exam.id}
+                  style={{ borderBottom: `1px solid ${theme.colors.slate100}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = theme.colors.slate50; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <td style={{ padding: "14px 16px", fontWeight: 600, fontSize: 14, color: theme.colors.slate800 }}>{exam.name}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.date}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.subject}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.questionCount}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{exam.participantCount}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 14, fontWeight: 600, color: theme.colors.slate800 }}>
+                    {exam.avgScore ?? "-"}
+                  </td>
+                  <td style={{ padding: "14px 16px" }}>
+                    <span style={{
+                      ...baseStyles.badge,
+                      background: status.background,
+                      color: status.color,
+                      border: `1px solid ${status.border}22`,
+                    }}>
+                      {status.icon}
+                      {status.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
@@ -4145,8 +5032,8 @@ export default function App() {
           <div style={{ display: "inline-flex", marginBottom: 16 }}>
             <AIBadge />
           </div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: theme.colors.slate900, marginBottom: 8 }}>Restoring session</div>
-          <div style={{ fontSize: 14, color: theme.colors.slate500, marginBottom: 20 }}>Checking saved login information and role access.</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: theme.colors.slate900, marginBottom: 8 }}>세션 복원 중</div>
+          <div style={{ fontSize: 14, color: theme.colors.slate500, marginBottom: 20 }}>저장된 로그인 정보와 접근 권한 확인 중.</div>
           <LoadingSkeleton lines={3} />
         </div>
       </div>
