@@ -2338,6 +2338,377 @@ function ExamManagementPage() {
    UNIVERSITY POLICY PAGE
    ═══════════════════════════════════════════════════════ */
 
+function InstructorDashboard({ onNavigate }) {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [dashboard, setDashboard] = useState(() => buildMockInstructorDashboard());
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/dashboard/instructor", { token: auth.accessToken });
+        if (cancelled) return;
+        setDashboard(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDashboard(buildMockInstructorDashboard());
+        setLoadError(error instanceof Error ? error.message : "대시보드 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} style={{ ...baseStyles.card }}><LoadingSkeleton lines={3} /></div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <DemoHelper text="강사용 대시보드와 실제 분석 데이터를 연결한 화면이다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          강사용 대시보드 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 24 }}>
+        {dashboard.stats.map((stat) => (
+          <StatCard
+            key={stat.label}
+            icon={stat.label.includes("Priority") ? AlertTriangle : stat.label.includes("average") ? TrendingUp : stat.label.includes("Strategies") ? Brain : Users}
+            label={stat.label}
+            value={stat.value}
+            sub={stat.sub}
+            color={theme.colors.primary600}
+            bgColor={theme.colors.primary50}
+          />
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
+        <div style={{ ...baseStyles.card }}>
+          <SectionHeader icon={AlertTriangle} title="상담 우선 학생" subtitle="목표 대학 대비 격차가 큰 학생 우선" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {dashboard.consultPriorityStudents.map((student) => (
+              <div
+                key={student.id}
+                onClick={() => onNavigate(`student-${student.id}`)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "14px 16px",
+                  borderRadius: theme.radius.lg,
+                  border: `1px solid ${theme.colors.slate100}`,
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: theme.radius.full,
+                  background: theme.colors.primary50,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  color: theme.colors.primary600,
+                }}>
+                  {student.name?.[0] || "학"}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{student.name}</span>
+                    <PriorityBadge priority={student.consultPriority} />
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.colors.slate500 }}>
+                    {student.targetUniv || "목표 대학 미설정"} · 격차 {student.gapScore}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {student.weaknessTypes.slice(0, 2).map((typeId) => <WeaknessBadge key={typeId} typeId={typeId} size="sm" />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ ...baseStyles.card }}>
+          <SectionHeader icon={Brain} title="취약 유형 분포" subtitle="현재 진단 기준 학생 분포" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {dashboard.weaknessDistribution.map((item) => (
+              <div key={item.weaknessTypeId}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{item.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{item.count}</span>
+                </div>
+                <ProgressBar value={item.count} max={Math.max(dashboard.consultPriorityStudents.length, 1)} color={theme.colors.ai500} height={6} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StudentDetailPage({ studentId, onBack }) {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [detail, setDetail] = useState(() => buildMockStudentDetail(studentId));
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStudentDetail() {
+      setLoading(true);
+      try {
+        const path = auth?.user?.role === "student" ? "/frontend/dashboard/student" : `/frontend/students/${studentId}`;
+        const response = await apiRequest(path, { token: auth?.accessToken });
+        if (cancelled) return;
+        setDetail(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDetail(buildMockStudentDetail(studentId));
+        setLoadError(error instanceof Error ? error.message : "학생 상세 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStudentDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken, auth?.user?.role, studentId]);
+
+  if (loading) {
+    return (
+      <div>
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}><LoadingSkeleton lines={4} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>
+          <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>
+        </div>
+      </div>
+    );
+  }
+
+  const student = detail.student;
+  const subjects = detail.subjects || [];
+  const recentExams = student.recentExams || [];
+  const tabs = [
+    { id: "overview", label: "개요" },
+    { id: "strategy", label: "전략" },
+    { id: "subjects", label: "과목" },
+    { id: "exams", label: "시험" },
+  ];
+  const radarData = subjects.map((subject) => ({
+    subject: subject.subjectName,
+    current: subject.currentScore,
+    target: subject.targetScore,
+  }));
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ ...baseStyles.btnSecondary, marginBottom: 16, padding: "8px 14px" }}>
+        <ArrowLeft size={16} /> 학생 목록으로
+      </button>
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          학생 상세 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+
+      <div style={{ ...baseStyles.card, marginBottom: 20, padding: "24px 28px", background: `linear-gradient(135deg, ${theme.colors.white}, ${theme.colors.primary50}40)` }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ width: 64, height: 64, borderRadius: theme.radius.xl, background: `linear-gradient(135deg, ${theme.colors.primary100}, ${theme.colors.ai100})`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: theme.colors.primary700, fontSize: 24 }}>
+            {student.name?.[0] || "학"}
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: theme.colors.slate900, margin: 0 }}>{student.name}</h2>
+              <PriorityBadge priority={student.consultPriority} />
+              {(detail.diagnosis?.weaknessTypes || []).map((typeId) => <WeaknessBadge key={typeId} typeId={typeId} />)}
+            </div>
+            <div style={{ fontSize: 14, color: theme.colors.slate500, display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <span>{student.grade} · {student.classGroup || "반 미배정"}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><School size={14} /> {student.targetUniv || "목표 대학 미설정"}</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 20, alignItems: "center", padding: "16px 24px", background: theme.colors.white, borderRadius: theme.radius.xl, border: `1px solid ${theme.colors.slate200}` }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: theme.colors.primary600 }}>{recentExams[recentExams.length - 1]?.totalScore || "-"}</div>
+              <div style={{ fontSize: 11, color: theme.colors.slate400 }}>최근 점수</div>
+            </div>
+            <div style={{ width: 1, height: 40, background: theme.colors.slate200 }} />
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: student.gapScore > 20 ? theme.colors.danger500 : theme.colors.accent500 }}>{student.gapScore}</div>
+              <div style={{ fontSize: 11, color: theme.colors.slate400 }}>목표 격차</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              ...baseStyles.btnGhost,
+              background: activeTab === tab.id ? theme.colors.primary50 : theme.colors.white,
+              color: activeTab === tab.id ? theme.colors.primary600 : theme.colors.slate600,
+              border: `1px solid ${activeTab === tab.id ? theme.colors.primary200 : theme.colors.slate200}`,
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "overview" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Brain} title="진단 근거" subtitle="현재 진단의 설명 가능한 근거" />
+            {(detail.diagnosis?.evidence || []).length ? (
+              detail.diagnosis.evidence.map((item, index) => (
+                <div key={index} style={{ padding: "12px 14px", marginBottom: 8, background: theme.colors.slate50, borderRadius: theme.radius.md }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.slate500 }}>{item.type || "근거"}</div>
+                  <div style={{ fontSize: 13, color: theme.colors.slate700 }}>{item.reason || JSON.stringify(item)}</div>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={Info} title="근거 데이터 없음" description="예시 모드 또는 분석 데이터 부족 상태." />
+            )}
+          </div>
+
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Target} title="목표 대비 위치" subtitle="현재 환산 점수와 목표 점수 비교" />
+            <GapBar current={detail.targetGap?.weighted_score || 0} target={detail.targetGap?.target_score || 0} label={detail.targetGap?.university_name || "목표 대학"} />
+            <div style={{ marginTop: 16 }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <RadarChart data={radarData}>
+                  <PolarGrid />
+                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 12 }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                  <Radar name="현재" dataKey="current" stroke={theme.colors.primary500} fill={theme.colors.primary500} fillOpacity={0.2} />
+                  <Radar name="목표" dataKey="target" stroke={theme.colors.ai500} fill={theme.colors.ai500} fillOpacity={0.1} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentDashboard() {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(() => buildMockStudentDetail("st1"));
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/dashboard/student", { token: auth.accessToken });
+        if (cancelled) return;
+        setDetail(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDetail(buildMockStudentDetail("st1"));
+        setLoadError(error instanceof Error ? error.message : "학생 대시보드 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  if (loading) {
+    return <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>;
+  }
+
+  const student = detail.student;
+  const topSubjects = (detail.strategy?.timeAllocation || []).slice(0, 3);
+
+  return (
+    <div>
+      <DemoHelper text="학생용 대시보드와 현재 분석 결과를 실제로 연동한 화면이다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          학생 대시보드 조회 실패. 예시 데이터 표시 상태.
+        </div>
+      )}
+
+      <div style={{ ...baseStyles.card, marginBottom: 20, background: `linear-gradient(135deg, ${theme.colors.primary600}, ${theme.colors.ai500})`, color: "#fff", border: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>{student.name}</h2>
+            <p style={{ fontSize: 14, opacity: 0.85, margin: 0 }}>목표 대학: <strong>{student.targetUniv || "미설정"}</strong></p>
+          </div>
+          <div style={{ padding: "16px 28px", background: "rgba(255,255,255,0.15)", borderRadius: theme.radius.xl, backdropFilter: "blur(8px)", textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 800 }}>{student.recentExams?.[student.recentExams.length - 1]?.totalScore || "-"}</div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>현재 점수 · 격차 {student.gapScore}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...baseStyles.card, marginBottom: 20 }}>
+        <SectionHeader icon={Sparkles} title="오늘의 집중 포인트" subtitle="현재 분석 결과 기반 우선 전략" action={<AIBadge />} />
+        <p style={{ fontSize: 14, color: theme.colors.slate700, lineHeight: 1.7 }}>{detail.strategy?.summary || "요약 전략 없음."}</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {topSubjects.map((item, index) => (
+            <div key={`${item.subject_code}-${index}`}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{item.subject_code}</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{item.ratio_percent}%</span>
+              </div>
+              <ProgressBar value={item.ratio_percent} max={100} color={theme.colors.primary500} height={8} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UniversityPolicyPage() {
   const [selectedUniv, setSelectedUniv] = useState(null);
 
@@ -4932,6 +5303,410 @@ function ExamManagementPage() {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function InstructorDashboard({ onNavigate }) {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [dashboard, setDashboard] = useState(() => buildMockInstructorDashboard());
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/dashboard/instructor", { token: auth.accessToken });
+        if (cancelled) return;
+        setDashboard(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDashboard(buildMockInstructorDashboard());
+        setLoadError(error instanceof Error ? error.message : "Instructor dashboard request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} style={{ ...baseStyles.card }}><LoadingSkeleton lines={3} /></div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <DemoHelper text="Instructor dashboard with live analysis data." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          Instructor dashboard request failed. Local fallback data is being shown.
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 24 }}>
+        {dashboard.stats.map((stat) => (
+          <StatCard
+            key={stat.label}
+            icon={stat.label.includes("Priority") ? AlertTriangle : stat.label.includes("average") ? TrendingUp : stat.label.includes("Strategies") ? Brain : Users}
+            label={stat.label}
+            value={stat.value}
+            sub={stat.sub}
+            color={theme.colors.primary600}
+            bgColor={theme.colors.primary50}
+          />
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div style={{ ...baseStyles.card }}>
+          <SectionHeader icon={AlertTriangle} title="Priority Students" subtitle="Largest target gap first" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {dashboard.consultPriorityStudents.map((student) => (
+              <div
+                key={student.id}
+                onClick={() => onNavigate(`student-${student.id}`)}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: theme.radius.lg, border: `1px solid ${theme.colors.slate100}`, cursor: "pointer" }}
+              >
+                <div style={{ width: 40, height: 40, borderRadius: theme.radius.full, background: theme.colors.primary50, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: theme.colors.primary600 }}>
+                  {student.name?.[0] || "S"}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{student.name}</span>
+                    <PriorityBadge priority={student.consultPriority} />
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.colors.slate500 }}>{student.targetUniv || "No target"} · gap {student.gapScore}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ ...baseStyles.card }}>
+          <SectionHeader icon={Brain} title="Weakness Distribution" subtitle="Current diagnosis distribution" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {dashboard.weaknessDistribution.map((item) => (
+              <div key={item.weaknessTypeId}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{item.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{item.count}</span>
+                </div>
+                <ProgressBar value={item.count} max={Math.max(dashboard.consultPriorityStudents.length, 1)} color={theme.colors.ai500} height={6} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StudentDetailPage({ studentId, onBack }) {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [detail, setDetail] = useState(() => buildMockStudentDetail(studentId));
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStudentDetail() {
+      setLoading(true);
+      try {
+        const path = auth?.user?.role === "student" ? "/frontend/dashboard/student" : `/frontend/students/${studentId}`;
+        const response = await apiRequest(path, { token: auth?.accessToken });
+        if (cancelled) return;
+        setDetail(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDetail(buildMockStudentDetail(studentId));
+        setLoadError(error instanceof Error ? error.message : "Student detail request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStudentDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken, auth?.user?.role, studentId]);
+
+  if (loading) {
+    return (
+      <div>
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}><LoadingSkeleton lines={4} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>
+          <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>
+        </div>
+      </div>
+    );
+  }
+
+  const student = detail.student;
+  const subjects = detail.subjects || [];
+  const recentExams = student.recentExams || [];
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "strategy", label: "Strategy" },
+    { id: "subjects", label: "Subjects" },
+    { id: "exams", label: "Exams" },
+  ];
+  const radarData = subjects.map((subject) => ({
+    subject: subject.subjectName,
+    current: subject.currentScore,
+    target: subject.targetScore,
+  }));
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ ...baseStyles.btnSecondary, marginBottom: 16, padding: "8px 14px" }}>
+        <ArrowLeft size={16} /> Back to students
+      </button>
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          Student detail request failed. Local fallback data is being shown.
+        </div>
+      )}
+
+      <div style={{ ...baseStyles.card, marginBottom: 20, padding: "24px 28px", background: `linear-gradient(135deg, ${theme.colors.white}, ${theme.colors.primary50}40)` }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ width: 64, height: 64, borderRadius: theme.radius.xl, background: `linear-gradient(135deg, ${theme.colors.primary100}, ${theme.colors.ai100})`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: theme.colors.primary700, fontSize: 24 }}>
+            {student.name?.[0] || "S"}
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: theme.colors.slate900, margin: 0 }}>{student.name}</h2>
+              <PriorityBadge priority={student.consultPriority} />
+              {(detail.diagnosis?.weaknessTypes || []).map((typeId) => <WeaknessBadge key={typeId} typeId={typeId} />)}
+            </div>
+            <div style={{ fontSize: 14, color: theme.colors.slate500, display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <span>{student.grade} · {student.classGroup || "No class"}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><School size={14} /> {student.targetUniv || "No target set"}</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 20, alignItems: "center", padding: "16px 24px", background: theme.colors.white, borderRadius: theme.radius.xl, border: `1px solid ${theme.colors.slate200}` }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: theme.colors.primary600 }}>{recentExams[recentExams.length - 1]?.totalScore || "-"}</div>
+              <div style={{ fontSize: 11, color: theme.colors.slate400 }}>Latest score</div>
+            </div>
+            <div style={{ width: 1, height: 40, background: theme.colors.slate200 }} />
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: student.gapScore > 20 ? theme.colors.danger500 : theme.colors.accent500 }}>{student.gapScore}</div>
+              <div style={{ fontSize: 11, color: theme.colors.slate400 }}>Target gap</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              ...baseStyles.btnGhost,
+              background: activeTab === tab.id ? theme.colors.primary50 : theme.colors.white,
+              color: activeTab === tab.id ? theme.colors.primary600 : theme.colors.slate600,
+              border: `1px solid ${activeTab === tab.id ? theme.colors.primary200 : theme.colors.slate200}`,
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "overview" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Brain} title="Diagnosis Evidence" subtitle="Explainable evidence for the current diagnosis" />
+            {(detail.diagnosis?.evidence || []).length ? (
+              detail.diagnosis.evidence.map((item, index) => (
+                <div key={index} style={{ padding: "12px 14px", marginBottom: 8, background: theme.colors.slate50, borderRadius: theme.radius.md }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.slate500 }}>{item.type || "evidence"}</div>
+                  <div style={{ fontSize: 13, color: theme.colors.slate700 }}>{item.reason || JSON.stringify(item)}</div>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={Info} title="No evidence items" description="Fallback mode or sparse analysis data." />
+            )}
+          </div>
+
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Target} title="Target Position" subtitle="Current weighted score versus target score" />
+            <GapBar current={detail.targetGap?.weighted_score || 0} target={detail.targetGap?.target_score || 0} label={detail.targetGap?.university_name || "Target university"} />
+            <div style={{ marginTop: 16 }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <RadarChart data={radarData}>
+                  <PolarGrid />
+                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 12 }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                  <Radar name="Current" dataKey="current" stroke={theme.colors.primary500} fill={theme.colors.primary500} fillOpacity={0.2} />
+                  <Radar name="Target" dataKey="target" stroke={theme.colors.ai500} fill={theme.colors.ai500} fillOpacity={0.1} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "strategy" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Sparkles} title="Strategy Summary" subtitle="Structured strategy from live analysis" action={<AIBadge />} />
+            <p style={{ fontSize: 14, color: theme.colors.slate700, lineHeight: 1.7 }}>{detail.strategy?.summary || "No strategy summary available."}</p>
+          </div>
+          <div style={{ ...baseStyles.card }}>
+            <SectionHeader icon={Lightbulb} title="Coaching Notes" subtitle="Points to focus during coaching or self-study" />
+            {(detail.strategy?.coachingPoints || []).map((point, index) => (
+              <div key={index} style={{ padding: "12px 14px", marginBottom: 8, background: theme.colors.ai50, borderRadius: theme.radius.md }}>{point}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "subjects" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+          {subjects.map((subject) => (
+            <div key={subject.subjectCode} style={{ ...baseStyles.card }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>{subject.subjectName}</div>
+                  <div style={{ fontSize: 12, color: theme.colors.slate500 }}>{subject.subjectCode}</div>
+                </div>
+                <div style={{ fontSize: 12, color: theme.colors.slate500 }}>weight {Math.round((subject.universityWeight || 0) * 100)}%</div>
+              </div>
+              <GapBar current={subject.currentScore} target={subject.targetScore} label="Current vs target" color={SUBJECT_CODE_META[subject.subjectCode]?.color || theme.colors.primary500} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === "exams" && (
+        <div style={{ ...baseStyles.card, padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: theme.colors.slate50, borderBottom: `1px solid ${theme.colors.slate200}` }}>
+                {["Exam", "Date", "Score", "Max"].map((header) => (
+                  <th key={header} style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: theme.colors.slate500 }}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recentExams.map((exam) => (
+                <tr key={exam.id} style={{ borderBottom: `1px solid ${theme.colors.slate100}` }}>
+                  <td style={{ padding: "14px 16px", fontSize: 13 }}>{exam.name}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13 }}>{exam.date}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13, fontWeight: 700 }}>{exam.totalScore}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 13 }}>{exam.maxScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentDashboard() {
+  const auth = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(() => buildMockStudentDetail("st1"));
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/dashboard/student", { token: auth.accessToken });
+        if (cancelled) return;
+        setDetail(response);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setDetail(buildMockStudentDetail("st1"));
+        setLoadError(error instanceof Error ? error.message : "Student dashboard request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  if (loading) {
+    return <div style={{ ...baseStyles.card }}><LoadingSkeleton lines={6} /></div>;
+  }
+
+  const student = detail.student;
+  const topSubjects = (detail.strategy?.timeAllocation || []).slice(0, 3);
+
+  return (
+    <div>
+      <DemoHelper text="Student dashboard connected to the current analysis results." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          Student dashboard request failed. Local fallback data is being shown.
+        </div>
+      )}
+
+      <div style={{ ...baseStyles.card, marginBottom: 20, background: `linear-gradient(135deg, ${theme.colors.primary600}, ${theme.colors.ai500})`, color: "#fff", border: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>{student.name}</h2>
+            <p style={{ fontSize: 14, opacity: 0.85, margin: 0 }}>Target: <strong>{student.targetUniv || "No target set"}</strong></p>
+          </div>
+          <div style={{ padding: "16px 28px", background: "rgba(255,255,255,0.15)", borderRadius: theme.radius.xl, backdropFilter: "blur(8px)", textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 800 }}>{student.recentExams?.[student.recentExams.length - 1]?.totalScore || "-"}</div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>Current score · gap {student.gapScore}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...baseStyles.card, marginBottom: 20 }}>
+        <SectionHeader icon={Sparkles} title="Today Focus" subtitle="Live strategy summary from the current analysis" action={<AIBadge />} />
+        <p style={{ fontSize: 14, color: theme.colors.slate700, lineHeight: 1.7 }}>{detail.strategy?.summary || "No summary available."}</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {topSubjects.map((item, index) => (
+            <div key={`${item.subject_code}-${index}`}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{item.subject_code}</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{item.ratio_percent}%</span>
+              </div>
+              <ProgressBar value={item.ratio_percent} max={100} color={theme.colors.primary500} height={8} />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
