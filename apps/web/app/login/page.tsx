@@ -4,15 +4,11 @@ export default function LoginPage() {
   return (
     <main className="grid" style={{ gap: 24, marginTop: 20 }}>
       <section className="hero">
-        <div className="eyebrow">Authentication</div>
-        <h1>로그인과 역할 기반 대시보드 연결</h1>
-        <p className="muted">
-          백엔드 인증 성공 시 토큰 저장.
-          이후 강사용과 학생용 화면에서 실제 API 호출 진행.
-        </p>
+        <div className="eyebrow">로그인</div>
+        <h1>역할에 맞는 화면으로 바로 들어가기</h1>
+        <p className="muted">강사와 학생은 같은 데이터 기반을 보되, 필요한 정보만 다르게 보여줘.</p>
       </section>
       <LoginForm />
     </main>
   );
 }
-

@@ -1,20 +1,7 @@
 "use client";
 
-export type UserRole = "admin" | "instructor" | "student";
-
-export type AuthUser = {
-  id: number;
-  email: string;
-  full_name: string;
-  role: UserRole;
-  academy_id: number | null;
-  preferred_subject_ids: number[];
-};
-
-export type AuthSession = {
-  accessToken: string;
-  user: AuthUser;
-};
+export type { AuthSession } from "./contracts";
+import type { AuthSession } from "./contracts";
 
 const AUTH_STORAGE_KEY = "unitflow-auth-session";
 const AUTH_EVENT_NAME = "unitflow-auth-changed";

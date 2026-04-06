@@ -3,15 +3,11 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { apiRequest } from "../lib/api";
-import { readAuthSession, writeAuthSession, type AuthSession, type AuthUser } from "../lib/auth";
+import { readAuthSession, writeAuthSession, type AuthSession } from "../lib/auth";
+import type { FrontendLoginResponse } from "../lib/contracts";
+import { StatusBox } from "./cards";
 
-type LoginResponse = {
-  access_token: string;
-  token_type: string;
-  user: AuthUser;
-};
-
-const demoAccounts = [
+const testAccounts = [
   { role: "관리자", email: "admin@unitflow.ai", password: "password123" },
   { role: "강사", email: "instructor@unitflow.ai", password: "password123" },
   { role: "학생", email: "student@unitflow.ai", password: "password123" }
@@ -38,12 +34,12 @@ export function LoginForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await apiRequest<LoginResponse>("/auth/login", {
+      const response = await apiRequest<FrontendLoginResponse>("/frontend/login", {
         method: "POST",
         body: { email, password }
       });
       const session: AuthSession = {
-        accessToken: response.access_token,
+        accessToken: response.accessToken,
         user: response.user
       };
       writeAuthSession(session);
@@ -51,7 +47,7 @@ export function LoginForm() {
         router.replace(response.user.role === "student" ? "/student" : "/instructor");
       });
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "로그인 실패");
+      setError(submitError instanceof Error ? submitError.message : "로그인에 실패했어.");
     } finally {
       setIsSubmitting(false);
     }
@@ -61,8 +57,8 @@ export function LoginForm() {
     <div className="grid two" style={{ alignItems: "start" }}>
       <section className="card">
         <div className="eyebrow">로그인</div>
-        <h2 className="section-title">실제 API 연동 시작</h2>
-        <p className="muted">백엔드 인증 성공 후 역할별 대시보드 이동.</p>
+        <h2 className="section-title">계정으로 바로 시작</h2>
+        <p className="muted">로그인하면 역할에 맞는 화면으로 이동해.</p>
 
         <form className="form-stack" onSubmit={handleSubmit}>
           <label className="field">
@@ -73,18 +69,18 @@ export function LoginForm() {
             <span>비밀번호</span>
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
           </label>
-          {error ? <div className="error-box">{error}</div> : null}
+          {error ? <StatusBox tone="error" title="로그인 실패" description={error} /> : null}
           <button className="primary-button" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "로그인 중..." : "로그인"}
+            {isSubmitting ? "확인 중" : "로그인"}
           </button>
         </form>
       </section>
 
       <section className="card">
-        <div className="eyebrow">예시 계정</div>
-        <h2 className="section-title">데모 계정 정보</h2>
+        <div className="eyebrow">테스트 계정</div>
+        <h2 className="section-title">바로 써볼 계정</h2>
         <div className="grid" style={{ gap: 12 }}>
-          {demoAccounts.map((account) => (
+          {testAccounts.map((account) => (
             <button
               key={account.email}
               className="account-preset"

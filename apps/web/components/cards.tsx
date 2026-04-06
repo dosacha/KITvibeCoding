@@ -32,3 +32,17 @@ export function NarrativeCard({ title, items }: NarrativeCardProps) {
   );
 }
 
+type StatusBoxProps = {
+  tone: "info" | "error";
+  title: string;
+  description: string;
+};
+
+export function StatusBox({ tone, title, description }: StatusBoxProps) {
+  return (
+    <div className={tone === "error" ? "error-box" : "info-box"}>
+      <strong style={{ display: "block", marginBottom: 4 }}>{title}</strong>
+      <span>{description}</span>
+    </div>
+  );
+}
