@@ -249,6 +249,49 @@ const EXAMS = [
   { id: "e5", name: "7월 학력평가", date: "2025-07-15", status: "예정", subject: "전과목", questionCount: 80, avgScore: null, participantCount: 0 },
 ];
 
+const API_BASE_URL = (typeof window !== "undefined" && window.__UNITFLOW_API_BASE_URL__) || "http://localhost:8000";
+const AUTH_STORAGE_KEY = "unitflow-frontend-auth";
+
+function getStoredSession() {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    return null;
+  }
+}
+
+function storeSession(session) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+}
+
+function clearStoredSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+async function apiRequest(path, { method = "GET", token, body } = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
 // AI Strategy for student st1
 const AI_STRATEGY_ST1 = {
   summary: "수학과 과학탐구의 기초 개념 보강이 최우선입니다. 서울대 경영학과 반영비중을 고려할 때, 수학 점수 상승이 합격 가능성에 가장 큰 영향을 미칩니다.",
@@ -644,21 +687,50 @@ function LoginPage({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [hoveredDemo, setHoveredDemo] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e?.preventDefault?.();
-    const user = DEMO_ACCOUNTS.find(a => a.email === email && a.password === password);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+    setLoading(true);
+    try {
+      const response = await apiRequest("/frontend/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      const session = {
+        accessToken: response.accessToken,
+        user: response.user,
+      };
+      storeSession(session);
+      onLogin(session);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "이메일 또는 비밀번호가 올바르지 않습니다.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const quickLogin = (account) => {
+  const quickLogin = async (account) => {
     setEmail(account.email);
     setPassword(account.password);
-    setTimeout(() => onLogin(account), 150);
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiRequest("/frontend/login", {
+        method: "POST",
+        body: { email: account.email, password: account.password },
+      });
+      const session = {
+        accessToken: response.accessToken,
+        user: response.user,
+      };
+      storeSession(session);
+      onLogin(session);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "데모 계정 로그인 실패");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -755,7 +827,7 @@ function LoginPage({ onLogin }) {
             background: `linear-gradient(135deg, ${theme.colors.primary600}, ${theme.colors.primary700})`,
             boxShadow: `0 2px 8px ${theme.colors.primary600}30`,
           }}>
-            로그인
+            {loading ? "로그인 중..." : "로그인"}
           </button>
         </div>
 
@@ -1205,9 +1277,42 @@ function InstructorDashboard({ onNavigate }) {
 function StudentListPage({ onNavigate }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterClass, setFilterClass] = useState("all");
+  const auth = useAuth();
+  const [students, setStudents] = useState(STUDENTS);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  const filtered = STUDENTS.filter(s => {
-    const matchSearch = s.name.includes(searchTerm) || s.targetUniv.includes(searchTerm);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStudents() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/students", { token: auth.accessToken });
+        if (cancelled) return;
+        setStudents(response.students || STUDENTS);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setStudents(STUDENTS);
+        setLoadError(error instanceof Error ? error.message : "학생 목록 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const filtered = students.filter(s => {
+    const targetUniv = s.targetUniv || "";
+    const matchSearch = s.name.includes(searchTerm) || targetUniv.includes(searchTerm);
     const matchClass = filterClass === "all" || s.classGroup === filterClass;
     return matchSearch && matchClass;
   });
@@ -1215,6 +1320,16 @@ function StudentListPage({ onNavigate }) {
   return (
     <div>
       <DemoHelper text="학생 목록에서 이름을 클릭하면 상세 진단/전략 화면으로 이동합니다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          학생 목록 API 호출 실패. 예시 데이터 표시 중.
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
         <div style={{ flex: 1, position: "relative" }}>
@@ -1275,7 +1390,7 @@ function StudentListPage({ onNavigate }) {
                   </div>
                 </td>
                 <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{st.classGroup}</td>
-                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{st.targetUniv}</td>
+                <td style={{ padding: "14px 16px", fontSize: 13, color: theme.colors.slate600 }}>{st.targetUniv || "미설정"}</td>
                 <td style={{ padding: "14px 16px", fontSize: 14, fontWeight: 600, color: theme.colors.slate800 }}>
                   {st.recentExams[st.recentExams.length - 1]?.totalScore || "—"}
                 </td>
@@ -1980,14 +2095,82 @@ function StudentDashboard() {
    ═══════════════════════════════════════════════════════ */
 
 function ExamManagementPage() {
+  const auth = useAuth();
+  const [exams, setExams] = useState(EXAMS);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExams() {
+      if (!auth?.accessToken) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await apiRequest("/frontend/exams", { token: auth.accessToken });
+        if (cancelled) return;
+        setExams(response.exams || EXAMS);
+        setLoadError("");
+      } catch (error) {
+        if (cancelled) return;
+        setExams(EXAMS);
+        setLoadError(error instanceof Error ? error.message : "시험 목록 조회 실패");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadExams();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.accessToken]);
+
+  const handleCreateExam = async () => {
+    if (!auth?.accessToken || auth.user.role === "student") return;
+    setCreating(true);
+    try {
+      const created = await apiRequest("/frontend/exams", {
+        method: "POST",
+        token: auth.accessToken,
+        body: {
+          academy_id: 1,
+          subject_id: 1,
+          name: `신규 시험 ${new Date().toLocaleDateString("ko-KR")}`,
+          exam_date: new Date().toISOString().slice(0, 10),
+          total_score: 100,
+        },
+      });
+      setExams(prev => [created, ...prev]);
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "시험 등록 실패");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div>
       <DemoHelper text="시험 관리 화면입니다. 시험 등록, 문제 태깅, 결과 입력을 관리할 수 있습니다." />
+      {loadError && (
+        <div style={{ ...baseStyles.card, marginBottom: 16, background: theme.colors.warning50, color: theme.colors.warning500 }}>
+          시험 API 호출 실패. 예시 데이터 표시 중.
+        </div>
+      )}
+      {loading && (
+        <div style={{ ...baseStyles.card, marginBottom: 16 }}>
+          <LoadingSkeleton lines={4} />
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div />
-        <button style={baseStyles.btnPrimary}>
-          <Plus size={16} /> 새 시험 등록
+        <button style={baseStyles.btnPrimary} onClick={handleCreateExam} disabled={creating || auth?.user?.role === "student"}>
+          <Plus size={16} /> {creating ? "등록 중..." : "새 시험 등록"}
         </button>
       </div>
 
@@ -2004,7 +2187,7 @@ function ExamManagementPage() {
             </tr>
           </thead>
           <tbody>
-            {EXAMS.map(exam => (
+            {exams.map(exam => (
               <tr key={exam.id} style={{ borderBottom: `1px solid ${theme.colors.slate100}`, cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = theme.colors.slate50}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -2141,16 +2324,44 @@ function UniversityPolicyPage() {
    ═══════════════════════════════════════════════════════ */
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
 
-  const handleLogin = (account) => {
-    setUser(account);
+  useEffect(() => {
+    const restored = getStoredSession();
+    if (!restored?.accessToken) return;
+
+    let cancelled = false;
+
+    async function restore() {
+      try {
+        const response = await apiRequest("/frontend/me", { token: restored.accessToken });
+        if (cancelled) return;
+        const nextSession = { accessToken: restored.accessToken, user: response.user };
+        storeSession(nextSession);
+        setSession(nextSession);
+      } catch {
+        clearStoredSession();
+        if (!cancelled) {
+          setSession(null);
+        }
+      }
+    }
+
+    restore();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLogin = (nextSession) => {
+    setSession(nextSession);
     setCurrentPage("dashboard");
   };
 
   const handleLogout = () => {
-    setUser(null);
+    clearStoredSession();
+    setSession(null);
     setCurrentPage("dashboard");
   };
 
@@ -2166,9 +2377,11 @@ export default function App() {
     document.head.appendChild(link);
   }, []);
 
-  if (!user) {
+  if (!session?.user) {
     return <LoginPage onLogin={handleLogin} />;
   }
+
+  const user = session.user;
 
   const renderPage = () => {
     if (user.role === "student") {
@@ -2198,7 +2411,7 @@ export default function App() {
   };
 
   return (
-    <AuthContext.Provider value={user}>
+    <AuthContext.Provider value={session}>
       <AppLayout user={user} currentPage={currentPage} setCurrentPage={setCurrentPage} onLogout={handleLogout}>
         {renderPage()}
       </AppLayout>
