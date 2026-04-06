@@ -1213,7 +1213,7 @@ function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
    INSTRUCTOR DASHBOARD
    ═══════════════════════════════════════════════════════ */
 
-function InstructorDashboard({ onNavigate }) {
+function LegacyInstructorDashboard_v2({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   useEffect(() => { setTimeout(() => setLoading(false), 600); }, []);
 
@@ -1558,7 +1558,7 @@ function StudentListPage({ onNavigate }) {
    STUDENT DETAIL PAGE (CORE DEMO SCREEN)
    ═══════════════════════════════════════════════════════ */
 
-function StudentDetailPage({ studentId, onBack }) {
+function LegacyStudentDetailPage_v2({ studentId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -2038,7 +2038,7 @@ function StudentDetailPage({ studentId, onBack }) {
    STUDENT DASHBOARD (Student's own view)
    ═══════════════════════════════════════════════════════ */
 
-function StudentDashboard() {
+function LegacyStudentDashboard_v2() {
   const student = STUDENTS[0]; // st1 - 이서연
   const strategy = AI_STRATEGY_ST1;
   const subjectData = SUBJECTS.map(sub => ({ ...sub, ...student.subjects[sub.id] })).filter(s => s.current);
@@ -2361,7 +2361,7 @@ function ExamManagementPage() {
    UNIVERSITY POLICY PAGE
    ═══════════════════════════════════════════════════════ */
 
-function InstructorDashboard({ onNavigate }) {
+function LegacyInstructorDashboard_v3({ onNavigate }) {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(() => buildMockInstructorDashboard());
@@ -2495,7 +2495,7 @@ function InstructorDashboard({ onNavigate }) {
   );
 }
 
-function StudentDetailPage({ studentId, onBack }) {
+function LegacyStudentDetailPage_v3({ studentId, onBack }) {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -2650,7 +2650,7 @@ function StudentDetailPage({ studentId, onBack }) {
   );
 }
 
-function StudentDashboard() {
+function LegacyStudentDashboard_v3() {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(() => buildMockStudentDetail("st1"));
@@ -2732,7 +2732,7 @@ function StudentDashboard() {
   );
 }
 
-function UniversityPolicyPage() {
+function LegacyUniversityPolicyPage_v2() {
   const [selectedUniv, setSelectedUniv] = useState(null);
 
   return (
@@ -3544,7 +3544,7 @@ function UniversityPolicyPage() {
   );
 }
 
-function StudentListPage({ onNavigate }) {
+function LegacyStudentListPage_v2({ onNavigate }) {
   const auth = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterClass, setFilterClass] = useState("all");
@@ -3729,7 +3729,7 @@ function StudentListPage({ onNavigate }) {
   );
 }
 
-function ExamManagementPage() {
+function LegacyExamManagementPage_v2() {
   const auth = useAuth();
   const [exams, setExams] = useState(EXAMS);
   const [metadata, setMetadata] = useState({ academies: [], subjects: [] });
@@ -3993,7 +3993,7 @@ function ExamManagementPage() {
   );
 }
 
-function WeaknessBadge({ typeId, size = "md" }) {
+function LegacyWeaknessBadge_v2({ typeId, size = "md" }) {
   const meta = {
     wt1: { label: "Concept Gap", color: "#EF4444", bgColor: "#FEE2E2", icon: "C" },
     wt2: { label: "Calculation Mistakes", color: "#F97316", bgColor: "#FFEDD5", icon: "M" },
@@ -4019,7 +4019,7 @@ function WeaknessBadge({ typeId, size = "md" }) {
   );
 }
 
-function PriorityBadge({ priority }) {
+function LegacyPriorityBadge_v2({ priority }) {
   const map = {
     high: { bg: theme.colors.danger50, color: theme.colors.danger500, border: `${theme.colors.danger500}22`, text: "High Priority" },
     medium: { bg: theme.colors.accent50, color: theme.colors.accent500, border: `${theme.colors.accent500}22`, text: "Watch" },
@@ -4036,7 +4036,7 @@ function PriorityBadge({ priority }) {
   );
 }
 
-function LoginPage({ onLogin }) {
+function LegacyLoginPage_v2({ onLogin }) {
   const accounts = [
     { email: "admin@unitflow.ai", password: "demo1234", role: "admin", name: "Admin Kim" },
     { email: "instructor@unitflow.ai", password: "demo1234", role: "instructor", name: "Instructor Lee" },
@@ -4177,7 +4177,7 @@ function LoginPage({ onLogin }) {
   );
 }
 
-function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
+function LegacyAppLayout_v2({ user, currentPage, setCurrentPage, onLogout, children }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const menuItems = useMemo(() => {
     const base = [{ id: "dashboard", label: "Dashboard", icon: Home }];
@@ -4333,7 +4333,7 @@ function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
   );
 }
 
-function GapBar({ current, target, label, color = theme.colors.primary500 }) {
+function LegacyGapBar_v2({ current, target, label, color = theme.colors.primary500 }) {
   const safeCurrent = Number(current || 0);
   const safeTarget = Number(target || 0);
   const gap = safeTarget - safeCurrent;
@@ -4383,7 +4383,7 @@ function GapBar({ current, target, label, color = theme.colors.primary500 }) {
   );
 }
 
-function DemoHelper({ text }) {
+function LegacyDemoHelper_v2({ text }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
@@ -4420,7 +4420,7 @@ function DemoHelper({ text }) {
   );
 }
 
-function CustomTooltip({ active, payload, label }) {
+function LegacyCustomTooltip_v2({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
     <div
@@ -4444,7 +4444,7 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-function UniversityPolicyPage() {
+function LegacyUniversityPolicyPage_v3() {
   const auth = useAuth();
   const [selectedUniv, setSelectedUniv] = useState(null);
   const [universities, setUniversities] = useState(() => buildMockUniversityPolicies().universities);
@@ -4573,7 +4573,7 @@ function UniversityPolicyPage() {
   );
 }
 
-function StudentListPage({ onNavigate }) {
+function LegacyStudentListPage_v3({ onNavigate }) {
   const auth = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterClass, setFilterClass] = useState("all");
@@ -4758,7 +4758,7 @@ function StudentListPage({ onNavigate }) {
   );
 }
 
-function WeaknessBadge({ typeId, size = "md" }) {
+function LegacyWeaknessBadge_v3({ typeId, size = "md" }) {
   const meta = {
     wt1: { label: "개념 결손", color: "#EF4444", bgColor: "#FEE2E2", icon: "개" },
     wt2: { label: "계산 실수", color: "#F97316", bgColor: "#FFEDD5", icon: "계" },
@@ -4784,7 +4784,7 @@ function WeaknessBadge({ typeId, size = "md" }) {
   );
 }
 
-function PriorityBadge({ priority }) {
+function LegacyPriorityBadge_v3({ priority }) {
   const map = {
     high: { bg: theme.colors.danger50, color: theme.colors.danger500, border: `${theme.colors.danger500}22`, text: "상담 우선" },
     medium: { bg: theme.colors.accent50, color: theme.colors.accent500, border: `${theme.colors.accent500}22`, text: "관찰 필요" },
@@ -4801,7 +4801,7 @@ function PriorityBadge({ priority }) {
   );
 }
 
-function LoginPage({ onLogin }) {
+function LegacyLoginPage_v3({ onLogin }) {
   const accounts = [
     { email: "admin@unitflow.ai", password: "demo1234", role: "admin", name: "관리자" },
     { email: "instructor@unitflow.ai", password: "demo1234", role: "instructor", name: "김민수 선생님" },
@@ -4942,7 +4942,7 @@ function LoginPage({ onLogin }) {
   );
 }
 
-function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
+function LegacyAppLayout_v3({ user, currentPage, setCurrentPage, onLogout, children }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const menuItems = useMemo(() => {
     const base = [{ id: "dashboard", label: "대시보드", icon: Home }];
@@ -5067,7 +5067,7 @@ function AppLayout({ user, currentPage, setCurrentPage, onLogout, children }) {
   );
 }
 
-function ExamManagementPage() {
+function LegacyExamManagementPage_v3() {
   const auth = useAuth();
   const [exams, setExams] = useState(EXAMS);
   const [metadata, setMetadata] = useState({ academies: [], subjects: [] });
@@ -5331,7 +5331,7 @@ function ExamManagementPage() {
   );
 }
 
-function InstructorDashboard({ onNavigate }) {
+function LegacyInstructorDashboard_v4({ onNavigate }) {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(() => buildMockInstructorDashboard());
@@ -5442,7 +5442,7 @@ function InstructorDashboard({ onNavigate }) {
   );
 }
 
-function StudentDetailPage({ studentId, onBack }) {
+function LegacyStudentDetailPage_v4({ studentId, onBack }) {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -5653,7 +5653,7 @@ function StudentDetailPage({ studentId, onBack }) {
   );
 }
 
-function StudentDashboard() {
+function LegacyStudentDashboard_v4() {
   const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(() => buildMockStudentDetail("st1"));
