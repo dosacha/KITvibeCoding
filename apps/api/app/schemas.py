@@ -136,6 +136,74 @@ class CurrentUserResponse(BaseModel):
     user: UserRead
 
 
+class FrontendStudentExamItem(BaseModel):
+    id: str
+    name: str
+    date: str
+    totalScore: float
+    maxScore: float
+
+
+class FrontendStudentListItem(BaseModel):
+    id: str
+    name: str
+    grade: str
+    classGroup: str | None = None
+    targetUniv: str | None = None
+    weaknessTypes: list[str] = Field(default_factory=list)
+    recentExams: list[FrontendStudentExamItem] = Field(default_factory=list)
+    consultPriority: str
+    gapScore: float
+
+
+class FrontendExamItem(BaseModel):
+    id: str
+    name: str
+    date: str
+    status: str
+    subject: str
+    questionCount: int
+    avgScore: float | None = None
+    participantCount: int
+
+
+class FrontendExamCreate(BaseModel):
+    academy_id: int
+    subject_id: int
+    name: str
+    exam_date: date
+    total_score: float
+
+
+class FrontendStudentsResponse(BaseModel):
+    students: list[FrontendStudentListItem]
+
+
+class FrontendExamsResponse(BaseModel):
+    exams: list[FrontendExamItem]
+
+
+class FrontendLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=4)
+
+
+class FrontendSessionUser(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+    role: Role
+
+
+class FrontendLoginResponse(BaseModel):
+    accessToken: str
+    user: FrontendSessionUser
+
+
+class FrontendMeResponse(BaseModel):
+    user: FrontendSessionUser
+
+
 class RecalculateResponse(BaseModel):
     student_profile_id: int
     diagnosis_id: int
