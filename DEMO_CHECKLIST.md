@@ -5,7 +5,7 @@
 - 백엔드 실행 확인
 - 프런트엔드 실행 확인
 - 테스트 계정 확인
-- `python -m app.seed` 실행 여부 확인
+- `python manage_db.py seed` 실행 여부 확인
 
 ## 강사 시연 흐름
 

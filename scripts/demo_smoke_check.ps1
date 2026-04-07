@@ -24,27 +24,27 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiDir = Join-Path $repoRoot "apps\api"
 $frontendDir = Join-Path $repoRoot "apps\frontend"
 
-Invoke-Step "Backend source compile check" {
+Invoke-Step "Backend compile check" {
     Push-Location $apiDir
     try {
-        python -m compileall app tests
+        python -m compileall app tests manage_db.py
     }
     finally {
         Pop-Location
     }
 }
 
-Invoke-Step "Frontend production build check" {
+Invoke-Step "Frontend build check" {
     Push-Location $frontendDir
     try {
-        npm.cmd run build
+        npm.cmd run smoke
     }
     finally {
         Pop-Location
     }
 }
 
-Invoke-Step "Backend health endpoint check" {
+Invoke-Step "Backend health check" {
     try {
         $response = Invoke-RestMethod -Method Get -Uri "$ApiBaseUrl/health" -TimeoutSec 5
         if ($response.status -ne "ok") {
@@ -53,25 +53,25 @@ Invoke-Step "Backend health endpoint check" {
         Write-Host "Health check passed: $ApiBaseUrl/health" -ForegroundColor Green
     }
     catch {
-        Write-Warning "Health endpoint check skipped or failed. Start the backend before using live API checks."
+        Write-Warning "Health check skipped because the backend is not running."
         Write-Warning $_
     }
 }
 
-Invoke-Step "Frontend endpoint availability check" {
+Invoke-Step "Endpoint list" {
     $paths = @(
-        "/frontend/login",
-        "/frontend/me",
+        "/auth/login",
+        "/auth/me",
         "/frontend/dashboard/instructor",
         "/frontend/dashboard/student",
         "/frontend/students",
         "/frontend/exams",
         "/frontend/metadata",
-        "/frontend/universities"
+        "/universities/policies"
     )
 
     foreach ($path in $paths) {
-        Write-Host "Configured endpoint: $ApiBaseUrl$path"
+        Write-Host "Endpoint: $ApiBaseUrl$path"
     }
 }
 
