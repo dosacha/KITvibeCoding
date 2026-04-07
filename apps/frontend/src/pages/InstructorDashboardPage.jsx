@@ -24,8 +24,7 @@ export function InstructorDashboardPage() {
       <section className="hero-card">
         <h1>오늘 먼저 볼 학생과 상담 포인트</h1>
         <p className="muted">
-          강사용 첫 화면은 결론부터 보여줘. 우선 상담 학생, 자주 보이는 취약 유형, 최근 시험 흐름을
-          한 번에 볼 수 있어.
+          강사 첫 화면에서 바로 보여주는 우선 상담 학생, 자주 보이는 취약 유형, 최근 시험 흐름을 한 번에 확인할 수 있어.
         </p>
         {loading ? <LoadingPanel title="강사용 요약을 불러오는 중" description="학생 진단과 전략을 정리하고 있어." /> : null}
         {error ? <StatusBox tone="error" title="화면을 불러오지 못했어" description={error} /> : null}
@@ -74,7 +73,7 @@ export function InstructorDashboardPage() {
           items={(data?.weakUnits ?? []).slice(0, 5).map((unit) => `${unit.unitName} · 이해도 ${formatPercent(unit.mastery)}`)}
         />
         <section className="table-card">
-          <h2>학생 바로 열기</h2>
+          <h2>학생 바로 보기</h2>
           <table>
             <thead>
               <tr>
