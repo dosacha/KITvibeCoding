@@ -12,7 +12,7 @@ function ShellContent({ children }) {
       <aside className="side-nav">
         <h1 className="brand-title">UnitFlow AI</h1>
         <p className="brand-copy">
-          학생 진단과 맞춤 학습 전략을 한 화면에서 정리하는 학원용 플랫폼
+          학생 진단과 맞춤 학습 전략을 한 화면에서 정리하는 학원 운영 도구야.
         </p>
         <nav className="nav-list">
           {menuItems.map((item) => (
