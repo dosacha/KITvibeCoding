@@ -1,14 +1,13 @@
 from datetime import date, timedelta
 
-from .db import Base, SessionLocal, engine
+from .db import SessionLocal, initialize_database
 from .models import Academy, ClassGroup, Exam, Question, QuestionUnitMapping, Role, StudentProfile, StudentResult, Subject, TargetUniversityProfile, UniversityScorePolicy, Unit, User
 from .security import hash_password
 from .services.analytics import recalculate_student_analysis
 
 
 def seed() -> None:
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    initialize_database(reset=True)
     db = SessionLocal()
 
     academy = Academy(name="UnitFlow Demo Academy")
@@ -97,4 +96,3 @@ def seed() -> None:
 
 if __name__ == "__main__":
     seed()
-

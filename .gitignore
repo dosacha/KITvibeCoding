@@ -9,11 +9,9 @@ dist/
 build/
 .env
 apps/api/.env
-apps/web/.env.local
 *.pyc
 *.pyo
 *.sqlite3
 *.db
 .tmp_prd/
 .tmp_prd.zip
-

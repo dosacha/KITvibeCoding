@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .db import Base, engine
+from .db import initialize_database, validate_database_configuration
 from .routers.analytics import router as analytics_router
 from .routers.auth import router as auth_router
 from .routers.dashboard import router as dashboard_router
@@ -11,7 +11,6 @@ from .routers.frontend import router as frontend_router
 from .routers.universities import router as universities_router
 
 
-Base.metadata.create_all(bind=engine)
 settings = get_settings()
 
 app = FastAPI(title="UnitFlow AI API", version="0.1.0")
@@ -22,6 +21,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup() -> None:
+    validate_database_configuration()
+    if settings.auto_create_schema:
+        initialize_database()
 
 
 @app.get("/health")
