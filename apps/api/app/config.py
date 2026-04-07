@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "UnitFlow AI API"
+    app_env: str = "development"
     database_url: str = "sqlite:///./unitflow.db"
+    auto_create_schema: bool = False
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720

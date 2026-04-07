@@ -35,7 +35,13 @@ scripts/
 루트의 `.env.example` 기준.
 
 ```env
+APP_ENV=development
 DATABASE_URL=sqlite:///./unitflow.db
+AUTO_CREATE_SCHEMA=false
+
+# 운영 권장 예시
+# DATABASE_URL=postgresql+psycopg://unitflow:unitflow@localhost:5432/unitflow
+
 JWT_SECRET=change-me
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
@@ -45,6 +51,13 @@ CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 UNITFLOW_API_BASE_URL=http://localhost:8000
 VITE_API_BASE_URL=http://localhost:8000
 ```
+
+## 데이터베이스 운영 원칙
+
+- 로컬 빠른 실행 기본값은 SQLite
+- 운영 권장 데이터베이스는 PostgreSQL
+- 서버 기동 시 자동 스키마 생성은 기본 비활성화
+- 스키마 생성과 초기 데이터 적재는 명시적 명령으로 처리
 
 ## 백엔드 실행
 
@@ -56,8 +69,22 @@ pip install -r requirements.txt
 copy ..\..\.env.example .env
 pip uninstall -y bcrypt
 pip install bcrypt==4.0.1
-python -m app.seed
+python manage_db.py seed
 python -m uvicorn app.main:app --reload
+```
+
+스키마만 만들고 싶을 때:
+
+```powershell
+cd apps/api
+python manage_db.py init
+```
+
+스키마만 초기화하고 싶을 때:
+
+```powershell
+cd apps/api
+python manage_db.py reset
 ```
 
 ## 프런트엔드 실행
