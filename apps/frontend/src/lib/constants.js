@@ -22,7 +22,7 @@ export const PRIORITY_LABELS = {
 };
 
 export const ROLE_LABELS = {
-  admin: "운영자",
+  admin: "관리자",
   instructor: "강사",
   student: "학생",
 };
@@ -46,5 +46,5 @@ export const MENU_BY_ROLE = {
 export const TEST_ACCOUNTS = [
   { role: "강사", email: "instructor@unitflow.ai", password: "password123" },
   { role: "학생", email: "student@unitflow.ai", password: "password123" },
-  { role: "운영자", email: "admin@unitflow.ai", password: "password123" },
+  { role: "관리자", email: "admin@unitflow.ai", password: "password123" },
 ];

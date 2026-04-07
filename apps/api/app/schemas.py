@@ -246,6 +246,8 @@ class StudentResultListItem(BaseModel):
     percentile: float | None = None
     grade: int | None = None
     completed_in_seconds: int | None = None
+    question_breakdown: dict[str, Any] = Field(default_factory=dict)
+    result_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 

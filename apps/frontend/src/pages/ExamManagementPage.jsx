@@ -258,7 +258,7 @@ export function ExamManagementPage() {
               )}
             </>
           ) : (
-            <StatusBox tone="empty" title="선택한 시험이 없어" description="먼저 시험을 등록하거나 목록에서 시험을 선택해." />
+            <StatusBox tone="empty" title="선택한 시험이 없어" description="먼저 시험을 등록하거나 목록에서 시험을 골라 줘." />
           )}
         </section>
       </section>
@@ -273,7 +273,7 @@ export function ExamManagementPage() {
                 <input type="number" value={questionForm.number} onChange={(event) => setQuestionForm((prev) => ({ ...prev, number: event.target.value }))} />
               </label>
               <label className="field">
-                <span>난이도</span>
+                <span>난도</span>
                 <select value={questionForm.difficulty} onChange={(event) => setQuestionForm((prev) => ({ ...prev, difficulty: Number(event.target.value) }))}>
                   {[1, 2, 3, 4, 5].map((value) => (
                     <option key={value} value={value}>{value}</option>
@@ -317,7 +317,7 @@ export function ExamManagementPage() {
               <tr>
                 <th>번호</th>
                 <th>유형</th>
-                <th>난이도</th>
+                <th>난도</th>
                 <th>배점</th>
                 <th>연결 단원</th>
               </tr>

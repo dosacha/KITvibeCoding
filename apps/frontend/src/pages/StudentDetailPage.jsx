@@ -9,16 +9,20 @@ import { LoadingPanel } from "../components/common/LoadingPanel.jsx";
 import { StatCard } from "../components/common/StatCard.jsx";
 import { StatusBox } from "../components/common/StatusBox.jsx";
 
-export function StudentDetailPage({ studentId }) {
-  const { session } = useAuth();
-  const { openPage } = useAppState();
-  const [resultForm, setResultForm] = useState({
+function createEmptyResultForm() {
+  return {
     exam_id: "",
     raw_score: "",
     percentile: "",
     grade: "",
     completed_in_seconds: "",
-  });
+  };
+}
+
+export function StudentDetailPage({ studentId }) {
+  const { session } = useAuth();
+  const { openPage } = useAppState();
+  const [resultForm, setResultForm] = useState(createEmptyResultForm());
   const [questionResults, setQuestionResults] = useState({});
   const [resultMessage, setResultMessage] = useState("");
   const [recalculateMessage, setRecalculateMessage] = useState("");
@@ -35,6 +39,31 @@ export function StudentDetailPage({ studentId }) {
   );
 
   const numericStudentId = Number(String(studentId).replace(/^st/, ""));
+  const selectedSavedResult = useMemo(
+    () => (resultsState.data ?? []).find((result) => String(result.exam_id) === String(resultForm.exam_id)),
+    [resultsState.data, resultForm.exam_id],
+  );
+
+  useEffect(() => {
+    if (!selectedSavedResult) {
+      setResultForm((previous) => ({
+        ...previous,
+        percentile: "",
+        grade: "",
+        completed_in_seconds: "",
+      }));
+      return;
+    }
+
+    setResultForm((previous) => ({
+      ...previous,
+      raw_score: String(selectedSavedResult.raw_score ?? ""),
+      percentile: selectedSavedResult.percentile != null ? String(selectedSavedResult.percentile) : "",
+      grade: selectedSavedResult.grade != null ? String(selectedSavedResult.grade) : "",
+      completed_in_seconds:
+        selectedSavedResult.completed_in_seconds != null ? String(selectedSavedResult.completed_in_seconds) : "",
+    }));
+  }, [selectedSavedResult]);
 
   useEffect(() => {
     const questions = questionState.data ?? [];
@@ -42,15 +71,24 @@ export function StudentDetailPage({ studentId }) {
       setQuestionResults({});
       return;
     }
-    setQuestionResults((previous) =>
+
+    const savedBreakdown = selectedSavedResult?.question_breakdown ?? {};
+    setQuestionResults(
       Object.fromEntries(
-        questions.map((question) => [
-          question.id,
-          previous[question.id] ?? { is_correct: false, points: question.points, estimated_seconds: question.estimated_seconds },
-        ]),
+        questions.map((question) => {
+          const saved = savedBreakdown[String(question.id)] ?? {};
+          return [
+            question.id,
+            {
+              is_correct: Boolean(saved.is_correct),
+              points: question.points,
+              estimated_seconds: saved.estimated_seconds ?? question.estimated_seconds,
+            },
+          ];
+        }),
       ),
     );
-  }, [questionState.data]);
+  }, [questionState.data, selectedSavedResult]);
 
   const latestExamLabel = useMemo(() => {
     const recent = detailState.data?.student?.recentExams ?? [];
@@ -85,9 +123,7 @@ export function StudentDetailPage({ studentId }) {
           question_count: questionState.data?.length ?? 0,
         },
       });
-      setResultMessage("학생 결과를 저장했고, 최신 전략도 함께 다시 계산했어.");
-      setResultForm({ exam_id: "", raw_score: "", percentile: "", grade: "", completed_in_seconds: "" });
-      setQuestionResults({});
+      setResultMessage("학생 결과를 저장했고 최신 전략도 다시 계산했어.");
       resultsState.reload();
       detailState.reload();
     } catch (submitError) {
@@ -117,7 +153,7 @@ export function StudentDetailPage({ studentId }) {
         <h1>{detailState.data?.student?.name ?? "학생"} 상세</h1>
         <p className="muted">
           {detailState.data
-            ? `${detailState.data.targetGap.university_name ?? "목표 대학"} 기준 격차는 ${formatScore(detailState.data.targetGap.gap)}야.`
+            ? `${detailState.data.targetGap.university_name ?? "목표 대학"} 기준 격차는 ${formatScore(detailState.data.targetGap.gap)}점이야.`
             : "학생 상세 정보를 불러오고 있어."}
         </p>
         {detailState.loading ? <LoadingPanel title="학생 상세를 불러오는 중" description="진단과 전략을 함께 정리하고 있어." /> : null}
@@ -128,7 +164,7 @@ export function StudentDetailPage({ studentId }) {
         <StatCard
           label="주요 진단"
           value={detailState.data?.diagnosis?.primaryWeaknessType ? toWeaknessLabel(detailState.data.diagnosis.primaryWeaknessType) : "-"}
-          description="현재 가장 우선으로 보는 취약 유형"
+          description="지금 가장 먼저 확인할 취약 유형"
         />
         <StatCard
           label="목표 대학 격차"
@@ -136,9 +172,9 @@ export function StudentDetailPage({ studentId }) {
           description="목표 대학 환산 점수 기준 차이"
         />
         <StatCard
-          label="최근 확인한 시험"
+          label="최근 확인 시험"
           value={latestExamLabel}
-          description="상세 화면과 연결된 최근 시험"
+          description="가장 최근에 반영된 시험"
         />
       </section>
 
@@ -171,7 +207,7 @@ export function StudentDetailPage({ studentId }) {
           )}
         />
         <ListCard
-          title="취약 단원"
+          title="보완이 필요한 단원"
           items={(detailState.data?.weakUnits ?? []).map(
             (unit) => `${toSubjectLabel(unit.subjectCode)} · ${unit.unitName} · 이해도 ${formatPercent(unit.mastery)}`,
           )}
@@ -184,7 +220,7 @@ export function StudentDetailPage({ studentId }) {
             <h2 style={{ margin: 0 }}>학생 결과 입력</h2>
             <button className="ghost-button" type="button" onClick={handleRecalculate}>전략 다시 계산</button>
           </div>
-          <p className="muted">시험을 고르고 문항별 정오답을 체크하면 점수가 자동으로 계산돼.</p>
+          <p className="muted">시험을 고르면 기존 저장값을 먼저 불러오고, 문항별 정오답을 체크하면 점수가 자동으로 계산돼.</p>
           <form className="form-stack" onSubmit={handleSaveResult}>
             <div className="form-grid">
               <label className="field">
@@ -212,7 +248,11 @@ export function StudentDetailPage({ studentId }) {
               </label>
               <label className="field">
                 <span>풀이 시간(초)</span>
-                <input type="number" value={resultForm.completed_in_seconds} onChange={(event) => setResultForm((prev) => ({ ...prev, completed_in_seconds: event.target.value }))} />
+                <input
+                  type="number"
+                  value={resultForm.completed_in_seconds}
+                  onChange={(event) => setResultForm((prev) => ({ ...prev, completed_in_seconds: event.target.value }))}
+                />
               </label>
             </div>
 
@@ -231,7 +271,7 @@ export function StudentDetailPage({ studentId }) {
                       </div>
                       <div className="question-card-meta">
                         <span>배점 {formatScore(question.points)}</span>
-                        <span>난이도 {question.difficulty}</span>
+                        <span>난도 {question.difficulty}</span>
                         <span>예상 시간 {question.estimated_seconds}초</span>
                       </div>
                       <div className="toolbar">
@@ -273,7 +313,7 @@ export function StudentDetailPage({ studentId }) {
                 })}
               </div>
             ) : resultForm.exam_id ? (
-              <StatusBox tone="empty" title="문항이 아직 없어" description="이 시험에는 아직 등록된 문항이 없어. 시험 관리에서 먼저 문항을 등록해." />
+              <StatusBox tone="empty" title="문항이 아직 없어" description="이 시험에는 아직 등록된 문항이 없어. 시험 관리에서 먼저 문항을 등록해 줘." />
             ) : null}
 
             <button className="primary-button" type="submit" disabled={!resultSubmitEnabled}>학생 결과 저장</button>

@@ -176,6 +176,8 @@ def list_student_results_endpoint(
             percentile=result.percentile,
             grade=result.grade,
             completed_in_seconds=result.completed_in_seconds,
+            question_breakdown=result.question_breakdown or {},
+            result_metadata=result.result_metadata or {},
             created_at=result.created_at,
         )
         for result in results
