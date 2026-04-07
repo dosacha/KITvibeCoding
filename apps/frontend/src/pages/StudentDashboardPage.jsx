@@ -26,7 +26,7 @@ export function StudentDashboardPage() {
           {data
             ? `${data.targetGap.university_name ?? "목표 대학"} 기준 현재 점수는 ${formatScore(
                 data.targetGap.weighted_score,
-              )}이고, 목표까지 ${formatScore(data.targetGap.gap)} 차이가 있어.`
+              )}점이고, 목표까지 ${formatScore(data.targetGap.gap)} 차이가 있어.`
             : "현재 위치를 정리하고 있어."}
         </p>
         {loading ? <LoadingPanel title="학생 전략을 불러오는 중" description="진단과 학습 전략을 정리하고 있어." /> : null}
@@ -66,7 +66,7 @@ export function StudentDashboardPage() {
 
       <section className="two-grid">
         <ListCard
-          title="왜 이런 전략이 나왔을까"
+          title="왜 이런 전략을 제안할까"
           items={(data?.diagnosis?.evidence ?? []).map((item) => String(item.reason ?? "근거 확인 필요"))}
         />
         <ListCard

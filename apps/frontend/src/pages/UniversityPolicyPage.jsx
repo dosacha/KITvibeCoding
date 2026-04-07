@@ -97,7 +97,7 @@ export function UniversityPolicyPage() {
     <div className="page-grid">
       <section className="hero-card">
         <h1>목표 대학 정책</h1>
-        <p className="muted">대학별 반영 비중과 목표 점수를 조회하고 직접 수정할 수 있어.</p>
+        <p className="muted">대학별 반영 비율과 목표 점수를 조회하고 직접 수정할 수 있어.</p>
         {loading ? <LoadingPanel title="대학 정책을 불러오는 중" description="대학별 반영 기준을 정리하고 있어." /> : null}
         {error ? <StatusBox tone="error" title="정책을 불러오지 못했어" description={error} /> : null}
       </section>
@@ -234,7 +234,7 @@ export function UniversityPolicyPage() {
               />
             </>
           ) : (
-            <StatusBox tone="empty" title="선택된 정책이 없어" description="왼쪽에서 기존 정책을 고르거나 새 정책을 등록해." />
+            <StatusBox tone="empty" title="선택한 정책이 없어" description="왼쪽에서 기존 정책을 고르거나 새 정책을 등록해 줘." />
           )}
         </section>
       </section>
