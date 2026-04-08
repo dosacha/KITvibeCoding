@@ -1,12 +1,14 @@
 // apps/frontend/src/pages/StudentListPage.jsx
 import { useMemo, useState } from "react";
+import { Search, ChevronRight } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext.jsx";
 import { useRouter } from "../router/hashRouter.js";
 import { apiClient } from "../lib/apiClient.js";
-import { formatScore, toPriorityLabel, toWeaknessLabel } from "../lib/formatters.js";
+import { formatScore } from "../lib/formatters.js";
 import { useAsyncData } from "../hooks/useAsyncData.js";
 import { LoadingPanel } from "../components/common/LoadingPanel.jsx";
 import { StatusBox } from "../components/common/StatusBox.jsx";
+import { WeaknessBadge, PriorityBadge } from "../components/common/VisualParts.jsx";
 
 export function StudentListPage() {
   const { session } = useAuth();
@@ -63,20 +65,22 @@ export function StudentListPage() {
           <tbody>
             {filteredStudents.map((student) => (
               <tr key={student.id} onClick={() => navigate(`${basePath}/${student.id}`)} style={{ cursor: "pointer" }}>
-                <td><strong>{student.name}</strong></td>
+                <td>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 10, background: "#3B82F615", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#3B82F6", fontSize: 13, flexShrink: 0 }}>{student.name[0]}</div>
+                    <strong>{student.name}</strong>
+                  </div>
+                </td>
                 <td>{student.classGroup ?? "-"}</td>
                 <td>{student.targetUniv ?? "-"}</td>
+                <td><PriorityBadge priority={student.consultPriority} /></td>
                 <td>
-                  <span className="pill" style={{
-                    background: student.consultPriority === "high" ? "rgba(220,38,38,0.08)" : student.consultPriority === "medium" ? "rgba(245,158,11,0.08)" : "rgba(16,185,129,0.08)",
-                    color: student.consultPriority === "high" ? "var(--danger)" : student.consultPriority === "medium" ? "var(--warning)" : "var(--success)",
-                    border: `1px solid ${student.consultPriority === "high" ? "rgba(220,38,38,0.18)" : student.consultPriority === "medium" ? "rgba(245,158,11,0.18)" : "rgba(16,185,129,0.18)"}`,
-                  }}>
-                    {toPriorityLabel(student.consultPriority)}
-                  </span>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {(student.weaknessTypes ?? []).slice(0, 2).map((wt) => <WeaknessBadge key={wt} typeId={wt} small />)}
+                    {(student.weaknessTypes ?? []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>-</span>}
+                  </div>
                 </td>
-                <td>{student.weaknessTypes.map(toWeaknessLabel).join(", ") || "-"}</td>
-                <td><strong>{formatScore(student.gapScore)}</strong></td>
+                <td><strong style={{ color: student.gapScore > 20 ? "#EF4444" : student.gapScore > 10 ? "#F59E0B" : "#10B981" }}>{formatScore(student.gapScore)}</strong></td>
               </tr>
             ))}
           </tbody>
