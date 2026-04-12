@@ -1,249 +1,109 @@
-from fastapi import APIRouter, Depends, HTTPException
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..dependencies import require_roles
-from ..models import Exam, Question, Role, StudentProfile, Subject, Unit
+from ..dependencies import get_current_user, require_roles
+from ..models import Role
 from ..schemas import (
+    CsvImportResultRead,
     ExamCreate,
     ExamRead,
     ExamUpdate,
+    LearningHabitSnapshotCreate,
+    LearningHabitSnapshotRead,
     QuestionCreate,
     QuestionRead,
     QuestionUpdate,
-    RecalculateResponse,
-    StudentDetailItem,
-    StudentListItem,
-    StudentResultListItem,
+    StrategyReviewRead,
+    StrategyReviewRequest,
+    StudentGoalCreate,
+    StudentGoalRead,
+    StudentProfileRead,
+    StudentProfileUpdate,
+    StudentResultCreate,
     StudentResultRead,
-    StudentResultUpsert,
-    UnitListItem,
 )
-from ..services.analytics import recalculate_student_analysis
-from ..services.domain import (
-    create_exam,
-    create_question,
-    get_student_profile_detail,
-    list_exam_questions,
-    list_exams,
-    list_student_profiles,
-    list_student_results,
-    list_units_by_subject,
-    update_exam,
-    update_question,
-    upsert_student_result,
-)
-
+from ..services import domain as domain_service
 
 router = APIRouter(tags=["domain"])
 
 
-@router.post("/exams", response_model=ExamRead)
-def create_exam_endpoint(
-    payload: ExamCreate,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> ExamRead:
-    _ensure_subject_exists(db, payload.subject_id)
-    exam = create_exam(db, payload, actor_user_id=current_user.id)
-    return ExamRead.model_validate(exam)
-
-
 @router.get("/exams", response_model=list[ExamRead])
-def list_exams_endpoint(
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> list[ExamRead]:
-    exams = list_exams(db)
-    return [ExamRead.model_validate(exam) for exam in exams]
+def list_exams(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.list_exams(db, current_user=current_user)
+
+
+@router.post("/exams", response_model=ExamRead)
+def create_exam(payload: ExamCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.create_exam(db, payload=payload, current_user=current_user)
 
 
 @router.put("/exams/{exam_id}", response_model=ExamRead)
-def update_exam_endpoint(
-    exam_id: int,
-    payload: ExamUpdate,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> ExamRead:
-    exam = db.get(Exam, exam_id)
-    if exam is None:
-        raise HTTPException(status_code=404, detail="시험 정보를 찾지 못했어.")
-    updated_exam = update_exam(db, exam, payload, actor_user_id=current_user.id)
-    return ExamRead.model_validate(updated_exam)
+def update_exam(exam_id: int, payload: ExamUpdate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.update_exam(db, exam_id=exam_id, payload=payload, current_user=current_user)
 
 
 @router.get("/exams/{exam_id}/questions", response_model=list[QuestionRead])
-def list_exam_questions_endpoint(
-    exam_id: int,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> list[QuestionRead]:
-    exam = db.get(Exam, exam_id)
-    if exam is None:
-        raise HTTPException(status_code=404, detail="시험 정보를 찾지 못했어.")
-    questions = list_exam_questions(db, exam_id)
-    return [QuestionRead.model_validate(question) for question in questions]
+def list_exam_questions(exam_id: int, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.list_exam_questions(db, exam_id=exam_id, current_user=current_user)
 
 
 @router.post("/questions", response_model=QuestionRead)
-def create_question_endpoint(
-    payload: QuestionCreate,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> QuestionRead:
-    _ensure_exam_exists(db, payload.exam_id)
-    _ensure_units_exist(db, [mapping.unit_id for mapping in payload.unit_mappings])
-    question = create_question(db, payload, actor_user_id=current_user.id)
-    return QuestionRead.model_validate(question)
+def create_question(payload: QuestionCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.create_question(db, payload=payload, current_user=current_user)
 
 
 @router.put("/questions/{question_id}", response_model=QuestionRead)
-def update_question_endpoint(
-    question_id: int,
-    payload: QuestionUpdate,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> QuestionRead:
-    question = db.get(Question, question_id)
-    if question is None:
-        raise HTTPException(status_code=404, detail="문항 정보를 찾지 못했어.")
-    if payload.unit_mappings is not None:
-        _ensure_units_exist(db, [mapping.unit_id for mapping in payload.unit_mappings])
-    updated_question = update_question(db, question, payload, actor_user_id=current_user.id)
-    return QuestionRead.model_validate(updated_question)
+def update_question(question_id: int, payload: QuestionUpdate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.update_question(db, question_id=question_id, payload=payload, current_user=current_user)
 
 
-@router.get("/students", response_model=list[StudentListItem])
-def list_students(
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> list[StudentListItem]:
-    students = list_student_profiles(db)
-    return [
-        StudentListItem(
-            student_profile_id=student.id,
-            user_id=student.user_id,
-            student_name=student.user.full_name,
-            grade_level=student.grade_level,
-            class_group_id=student.class_group_id,
-            target_university_profile_id=student.target_university_profile_id,
-        )
-        for student in students
-    ]
-
-
-@router.get("/students/{student_profile_id}", response_model=StudentDetailItem)
-def get_student_detail(
-    student_profile_id: int,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> StudentDetailItem:
-    student = get_student_profile_detail(db, student_profile_id)
-    if student is None:
-        raise HTTPException(status_code=404, detail="학생 정보를 찾지 못했어.")
-    return StudentDetailItem(
-        student_profile_id=student.id,
-        user_id=student.user_id,
-        student_name=student.user.full_name,
-        grade_level=student.grade_level,
-        class_group_id=student.class_group_id,
-        class_group_name=getattr(getattr(student, "class_group", None), "name", None),
-        target_university_profile_id=student.target_university_profile_id,
-        study_style_notes=student.study_style_notes,
-    )
-
-
-@router.get("/students/{student_profile_id}/results", response_model=list[StudentResultListItem])
-def list_student_results_endpoint(
-    student_profile_id: int,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> list[StudentResultListItem]:
-    student = db.get(StudentProfile, student_profile_id)
-    if student is None:
-        raise HTTPException(status_code=404, detail="학생 정보를 찾지 못했어.")
-    results = list_student_results(db, student_profile_id)
-    subject_name_map = {subject.id: subject.name for subject in db.query(Subject).all()}
-    exam_name_map = {exam.id: exam.name for exam in db.query(Exam).all()}
-    return [
-        StudentResultListItem(
-            id=result.id,
-            exam_id=result.exam_id,
-            exam_name=exam_name_map.get(result.exam_id, f"시험 {result.exam_id}"),
-            subject_id=result.subject_id,
-            subject_name=subject_name_map.get(result.subject_id, f"과목 {result.subject_id}"),
-            raw_score=result.raw_score,
-            percentile=result.percentile,
-            grade=result.grade,
-            completed_in_seconds=result.completed_in_seconds,
-            question_breakdown=result.question_breakdown or {},
-            result_metadata=result.result_metadata or {},
-            created_at=result.created_at,
-        )
-        for result in results
-    ]
-
-
-@router.get("/subjects/{subject_id}/units", response_model=list[UnitListItem])
-def list_subject_units_endpoint(
-    subject_id: int,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> list[UnitListItem]:
-    _ensure_subject_exists(db, subject_id)
-    units = list_units_by_subject(db, subject_id)
-    return [UnitListItem.model_validate(unit) for unit in units]
+@router.get("/students/{student_profile_id}/results", response_model=list[StudentResultRead])
+def list_student_results(student_profile_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return domain_service.list_student_results(db, student_id=student_profile_id, current_user=current_user)
 
 
 @router.post("/student-results", response_model=StudentResultRead)
-def upsert_student_result_endpoint(
-    payload: StudentResultUpsert,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> StudentResultRead:
-    if db.get(StudentProfile, payload.student_profile_id) is None:
-        raise HTTPException(status_code=404, detail="학생 정보를 찾지 못했어.")
-    try:
-        result = upsert_student_result(db, payload, actor_user_id=current_user.id, recalculate=True)
-    except ValueError as exc:
-        if str(exc) == "exam_not_found":
-            raise HTTPException(status_code=404, detail="시험 정보를 찾지 못했어.") from exc
-        raise
-    return StudentResultRead.model_validate(result)
+def save_student_result(payload: StudentResultCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.save_student_result(db, payload=payload, current_user=current_user)
 
 
-@router.post("/students/{student_profile_id}/recalculate", response_model=RecalculateResponse)
-def recalculate_student_endpoint(
-    student_profile_id: int,
-    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
-    db: Session = Depends(get_db),
-) -> RecalculateResponse:
-    student = db.get(StudentProfile, student_profile_id)
-    if student is None:
-        raise HTTPException(status_code=404, detail="학생 정보를 찾지 못했어.")
-    diagnosis, strategy = recalculate_student_analysis(db, student, actor_user_id=current_user.id)
-    return RecalculateResponse(
-        student_profile_id=student_profile_id,
-        diagnosis_id=diagnosis.id,
-        strategy_id=strategy.id,
-        recalculated_at=diagnosis.computed_at,
-    )
+@router.post("/student-results/upload-csv", response_model=CsvImportResultRead)
+def upload_student_results_csv(exam_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.import_results_from_csv(db, exam_id=exam_id, file=file, current_user=current_user)
 
 
-def _ensure_exam_exists(db: Session, exam_id: int) -> None:
-    if db.get(Exam, exam_id) is None:
-        raise HTTPException(status_code=404, detail="시험 정보를 찾지 못했어.")
+@router.post("/students/{student_profile_id}/recalculate")
+def recalculate_student(student_profile_id: int, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    result = domain_service.recalculate_student(db, student_id=student_profile_id, current_user=current_user)
+    return {
+        "diagnosis_id": result["diagnosis"].id,
+        "strategy_ids": [strategy.id for strategy in result["strategies"]],
+    }
 
 
-def _ensure_subject_exists(db: Session, subject_id: int) -> None:
-    if db.get(Subject, subject_id) is None:
-        raise HTTPException(status_code=404, detail="과목 정보를 찾지 못했어.")
+@router.put("/students/{student_profile_id}/profile", response_model=StudentProfileRead)
+def update_student_profile(student_profile_id: int, payload: StudentProfileUpdate, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.update_student_profile(db, student_id=student_profile_id, payload=payload, current_user=current_user)
 
 
-def _ensure_units_exist(db: Session, unit_ids: list[int]) -> None:
-    if not unit_ids:
-        return
-    existing_ids = {unit.id for unit in db.query(Unit).filter(Unit.id.in_(unit_ids)).all()}
-    missing_ids = [unit_id for unit_id in unit_ids if unit_id not in existing_ids]
-    if missing_ids:
-        raise HTTPException(status_code=404, detail=f"단원 정보를 찾지 못했어: {', '.join(str(unit_id) for unit_id in missing_ids)}")
+@router.post("/students/{student_profile_id}/habits", response_model=LearningHabitSnapshotRead)
+def add_habit_snapshot(student_profile_id: int, payload: LearningHabitSnapshotCreate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return domain_service.add_habit_snapshot(db, student_id=student_profile_id, payload=payload, current_user=current_user)
+
+
+@router.put("/students/{student_profile_id}/goals", response_model=list[StudentGoalRead])
+def replace_goals(student_profile_id: int, payload: list[StudentGoalCreate], db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return domain_service.replace_goals(db, student_id=student_profile_id, goals=payload, current_user=current_user)
+
+
+@router.post("/strategies/{strategy_id}/reviews", response_model=StrategyReviewRead)
+def review_strategy(strategy_id: int, payload: StrategyReviewRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR))):
+    return domain_service.review_strategy(db, strategy_id=strategy_id, payload=payload, current_user=current_user)
+
+
+@router.get("/strategies/{strategy_id}/reviews", response_model=list[StrategyReviewRead])
+def list_strategy_reviews(strategy_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return domain_service.list_strategy_reviews(db, strategy_id=strategy_id, current_user=current_user)

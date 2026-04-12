@@ -1,153 +1,906 @@
-// apps/frontend/src/pages/StudentDetailPage.jsx
-import { useEffect, useMemo, useState } from "react";
-import { Brain, Target, Calendar, BarChart3, TrendingUp, BookOpen, Users, FileText, ArrowLeft, RefreshCw } from "lucide-react";
-import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from "recharts";
-import { useAuth } from "../contexts/AuthContext.jsx";
-import { useRouter } from "../router/hashRouter.js";
-import { apiClient } from "../lib/apiClient.js";
-import { formatPercent, formatScore, toSubjectLabel } from "../lib/formatters.js";
-import { useAsyncData } from "../hooks/useAsyncData.js";
-import { StatCard } from "../components/common/StatCard.jsx";
-import { StatusBox } from "../components/common/StatusBox.jsx";
-import { LoadingPanel } from "../components/common/LoadingPanel.jsx";
-import { Tabs } from "../components/common/Tabs.jsx";
-import { AIBadge, WeaknessBadge, GapBar, ProgressBar, SectionHeader, GlassTooltip, SUBJECT_COLORS } from "../components/common/VisualParts.jsx";
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import Layout from '../components/Layout.jsx';
+import SectionCard from '../components/SectionCard.jsx';
+import StatusBadge from '../components/StatusBadge.jsx';
+import StrategyCompareCard from '../components/StrategyCompareCard.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAsyncData } from '../hooks/useAsyncData.js';
+import { apiRequest } from '../lib/api.js';
 
-function emptyForm() { return { exam_id: "", raw_score: "", percentile: "", grade: "", completed_in_seconds: "" }; }
+// 학생 상세 + 전략 비교 페이지.
+//
+// 데이터 소스:
+//   - GET /frontend/students/{id}                    → 프로필 / 목표 / 진단 / mastery / 결과
+//   - GET /frontend/students/{id}/strategy-options   → basic vs conservative 비교, 승인본, pending, diagnosis, history
+//   - GET /frontend/metadata                         → universities (목표 폼)
+//   - GET /students/{id}/results                     → 최근 결과
+//   - GET /exams                                     → 결과 표 join
+//
+// 변경:
+//   - PUT /students/{id}/profile, PUT /students/{id}/goals, POST /students/{id}/habits
+//   - POST /students/{id}/recalculate
+//   - POST /strategies/{id}/reviews — variant 단위로 approve / hold / revise
+//
+// 슬라이스 2 핵심: 전략 섹션이 페이지 최상단에 오고, basic vs conservative 를 나란히 보여 주며,
+// 강사가 한 variant 를 채택해 검토 폼으로 끌어와 approve/hold/revise 를 진행한다.
 
-export function StudentDetailPage({ studentId }) {
-  const { session } = useAuth();
-  const { pathname, navigate } = useRouter();
-  const backPath = pathname.startsWith("/admin") ? "/admin/students" : "/teacher/students";
-  const [rf, setRf] = useState(emptyForm());
-  const [qr, setQr] = useState({});
-  const [msg, setMsg] = useState("");
-  const [rmsg, setRmsg] = useState("");
+const emptyHabitDraft = {
+  recent_learning_mode: 'mixed',
+  self_study_ratio: 0.25,
+  lecture_ratio: 0.25,
+  error_note_ratio: 0.25,
+  problem_solving_ratio: 0.25,
+  review_habit_score: 50,
+  consistency_score: 50,
+  notes: '',
+};
 
-  const detail = useAsyncData(() => apiClient.getStudentDetail(session.accessToken, studentId), [session.accessToken, studentId]);
-  const numId = Number(String(studentId).replace(/^st/, ""));
-  const results = useAsyncData(() => apiClient.getStudentResults(session.accessToken, numId), [session.accessToken, studentId]);
-  const exams = useAsyncData(() => apiClient.getExams(session.accessToken), [session.accessToken]);
-  const questions = useAsyncData(() => rf.exam_id ? apiClient.getExamQuestions(session.accessToken, Number(rf.exam_id)) : Promise.resolve([]), [session.accessToken, rf.exam_id]);
+const WEAKNESS_LABEL = {
+  concept_gap: '개념 결손형',
+  transfer_weakness: '적용 전이 약형',
+  precision_accuracy: '정확도 부족형',
+  time_pressure: '시간 압박형',
+  instability: '편차 큰 불안정형',
+  persistence_risk: '지속성 취약형',
+};
 
-  const savedResult = useMemo(() => (results.data ?? []).find((r) => String(r.exam_id) === String(rf.exam_id)), [results.data, rf.exam_id]);
+function weaknessLabel(value) {
+  return WEAKNESS_LABEL[value] || value || '-';
+}
+
+function parseList(value) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildReviewDraft(variant) {
+  if (!variant) return null;
+  const plan = variant.structured_plan || {};
+  return {
+    decision: 'approve',
+    reason: '강사 검토 완료',
+    summary: variant.natural_language_summary || '',
+    teacher_notes: plan.teacher_notes || '',
+    student_message: plan.student_message || variant.student_coaching || '',
+    next_check_date: plan.next_check_in?.date || '',
+  };
+}
+
+export default function StudentDetailPage() {
+  const { token } = useAuth();
+  const { studentId } = useParams();
+
+  const [profileDraft, setProfileDraft] = useState(null);
+  const [goalDrafts, setGoalDrafts] = useState([]);
+  const [habitDraft, setHabitDraft] = useState(emptyHabitDraft);
+  const [pageMessage, setPageMessage] = useState('');
+  const [pageError, setPageError] = useState('');
+
+  // 전략 비교 / 검토 상태
+  const [selectedVariantId, setSelectedVariantId] = useState(null);
+  const [reviewDraft, setReviewDraft] = useState(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+
+  const showFlash = (msg) => {
+    setPageMessage(msg);
+    setPageError('');
+  };
+  const showError = (msg) => {
+    setPageError(msg);
+    setPageMessage('');
+  };
+
+  const { data, loading, error, reload } = useAsyncData(
+    async () => {
+      const detail = await apiRequest(`/frontend/students/${studentId}`, { token });
+      const [strategyOptions, metadata, results, exams] = await Promise.all([
+        apiRequest(`/frontend/students/${studentId}/strategy-options`, { token }),
+        apiRequest('/frontend/metadata', { token }),
+        apiRequest(`/students/${studentId}/results`, { token }),
+        apiRequest('/exams', { token }),
+      ]);
+      return { detail, strategyOptions, metadata, results, exams };
+    },
+    [token, studentId]
+  );
+
   useEffect(() => {
-    if (!savedResult) { setRf((p) => ({ ...p, percentile: "", grade: "", completed_in_seconds: "" })); return; }
-    setRf((p) => ({ ...p, raw_score: String(savedResult.raw_score ?? ""), percentile: savedResult.percentile != null ? String(savedResult.percentile) : "", grade: savedResult.grade != null ? String(savedResult.grade) : "", completed_in_seconds: savedResult.completed_in_seconds != null ? String(savedResult.completed_in_seconds) : "" }));
-  }, [savedResult]);
-  useEffect(() => {
-    const qs = questions.data ?? [];
-    if (!qs.length) { setQr({}); return; }
-    const saved = savedResult?.question_breakdown ?? {};
-    setQr(Object.fromEntries(qs.map((q) => [q.id, { is_correct: Boolean(saved[String(q.id)]?.is_correct), points: q.points }])));
-  }, [questions.data, savedResult]);
+    if (!data) return;
+    const { detail, metadata, strategyOptions } = data;
 
-  const calcScore = useMemo(() => { const qs = questions.data ?? []; if (!qs.length) return Number(rf.raw_score || 0); return qs.reduce((t, q) => t + (qr[q.id]?.is_correct ? Number(q.points) : 0), 0); }, [qr, questions.data, rf.raw_score]);
-  const latestExam = useMemo(() => { const r = detail.data?.student?.recentExams ?? []; return r.length ? r[r.length - 1].name : "-"; }, [detail.data]);
+    setProfileDraft({
+      grade_level: detail.student.grade_level || '',
+      enrollment_status: detail.student.enrollment_status || 'active',
+      weekly_available_hours: detail.student.weekly_available_hours || 0,
+      preferred_subjects: (detail.student.preferred_subjects || []).join(', '),
+      disliked_subjects: (detail.student.disliked_subjects || []).join(', '),
+      learning_style_preferences: '',
+      study_style_notes: detail.student.study_style_notes || '',
+    });
 
-  async function saveResult(e) { e.preventDefault(); setMsg(""); try { await apiClient.saveStudentResult(session.accessToken, { student_profile_id: numId, exam_id: Number(rf.exam_id), raw_score: calcScore, percentile: rf.percentile ? Number(rf.percentile) : null, grade: rf.grade ? Number(rf.grade) : null, completed_in_seconds: rf.completed_in_seconds ? Number(rf.completed_in_seconds) : null, question_breakdown: Object.fromEntries(Object.entries(qr).map(([k, v]) => [String(k), v])), result_metadata: { source: "frontend_manual" } }); setMsg("결과를 저장하고 전략을 다시 계산했어요."); results.reload(); detail.reload(); } catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); } }
-  async function recalc() { setRmsg(""); try { await apiClient.recalculateStudent(session.accessToken, numId); setRmsg("진단과 전략을 다시 계산했어요."); detail.reload(); } catch (e) { setRmsg(e instanceof Error ? e.message : "재계산 실패"); } }
+    const policyLookup = new Map(
+      metadata.universities.map((policy) => [`${policy.university_name}::${policy.admission_type}`, policy.id])
+    );
+    setGoalDrafts(
+      (detail.goals || []).map((goal) => ({
+        policy_id: policyLookup.get(`${goal.university_name}::${goal.admission_type}`) || '',
+        target_department: goal.target_department,
+        priority_order: goal.priority_order,
+        is_active: goal.is_active,
+        notes: '',
+      }))
+    );
+    setHabitDraft(emptyHabitDraft);
 
-  const d = detail.data;
-  const radarData = (d?.subjects ?? []).map((s) => ({ subject: s.subjectName, 현재: s.currentScore, 목표: s.targetScore }));
-  const trendData = (d?.student?.recentExams ?? []).map((e) => ({ name: e.name?.slice(0, 4) ?? "", 점수: e.totalScore ?? e.raw_score ?? 0 }));
+    // 전략 검토 대상 variant 자동 선택: 학생 노출본이 있으면 그것, 없으면 첫 variant.
+    const variants = strategyOptions?.latest_set?.variants || [];
+    if (variants.length === 0) {
+      setSelectedVariantId(null);
+      setReviewDraft(null);
+      return;
+    }
+    const visible = variants.find((variant) => variant.is_student_visible);
+    const initial = visible || variants[0];
+    setSelectedVariantId(initial.id);
+    setReviewDraft(buildReviewDraft(initial));
+  }, [data]);
 
-  // ── 진단 요약 탭 ──
-  const diagTab = <div className="page-grid" style={{ marginTop: 14 }}>
-    <section className="stats-grid">
-      <StatCard icon={Brain} label="주요 진단" value={d?.diagnosis?.primaryWeaknessType ? <WeaknessBadge typeId={d.diagnosis.primaryWeaknessType} /> : "-"} description="가장 먼저 확인할 유형" color="#7C3AED" />
-      <StatCard icon={Target} label="목표 대학 격차" value={formatScore(d?.targetGap?.gap)} description="환산 점수 기준" color="#EF4444" />
-      <StatCard icon={Calendar} label="최근 시험" value={latestExam} description="가장 최근 반영" color="#10B981" />
-    </section>
+  // ----- helpers ----------------------------------------------------------
 
-    {d?.strategy?.studentSummary && <section className="hero-card" style={{ border: "1px solid rgba(124,58,237,0.18)", background: "linear-gradient(135deg, rgba(124,58,237,0.05), rgba(255,255,255,0.45))" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><AIBadge /><span style={{ fontSize: 15, fontWeight: 700 }}>학습 전략 요약</span></div>
-      <p style={{ fontSize: 14, color: "#475569", margin: 0, lineHeight: 1.75 }}>{d.strategy.studentSummary}</p>
-      {d.strategy.instructorSummary && <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 12, background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.12)" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#94A3B8", marginBottom: 4 }}>💬 강사용 상담 포인트</div>
-        <p style={{ fontSize: 13, color: "#475569", margin: 0 }}>{d.strategy.instructorSummary}</p>
-        {(d.strategy.coachingPoints ?? []).map((p, i) => <div key={i} style={{ padding: "8px 12px", marginTop: 6, borderRadius: 10, background: "rgba(255,255,255,0.3)", border: "1px solid rgba(255,255,255,0.4)", fontSize: 13, color: "#475569", display: "flex", gap: 8 }}><span style={{ width: 20, height: 20, borderRadius: 6, background: "#3B82F612", color: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{i + 1}</span>{p}</div>)}
-      </div>}
-    </section>}
+  const examMap = useMemo(() => {
+    const map = new Map();
+    (data?.exams || []).forEach((exam) => map.set(exam.id, exam));
+    return map;
+  }, [data]);
 
-    <section className="two-grid">
-      {radarData.length > 0 && <section className="panel">
-        <SectionHeader icon={Target} title="과목별 현재 vs 목표" />
-        <ResponsiveContainer width="100%" height={260}>
-          <RadarChart data={radarData}>
-            <PolarGrid stroke="rgba(0,0,0,0.06)" />
-            <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: "#475569" }} />
-            <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "#94A3B8" }} />
-            <Radar name="현재" dataKey="현재" stroke="#7C3AED" fill="#7C3AED" fillOpacity={0.15} strokeWidth={2} />
-            <Radar name="목표" dataKey="목표" stroke="#EF4444" fill="#EF4444" fillOpacity={0.04} strokeWidth={2} strokeDasharray="5 5" />
-            <Tooltip />
-          </RadarChart>
-        </ResponsiveContainer>
-      </section>}
+  const strategyOptions = data?.strategyOptions || null;
+  const variants = strategyOptions?.latest_set?.variants || [];
+  const selectedVariant = variants.find((variant) => variant.id === selectedVariantId) || null;
 
-      <section className="panel">
-        <SectionHeader icon={BarChart3} title="과목별 갭 분석" subtitle="대학 반영비중 고려" />
-        {(d?.subjects ?? []).map((s, i) => <GapBar key={i} current={s.currentScore} target={s.targetScore} label={s.subjectName} color={SUBJECT_COLORS[s.subjectName] ?? "#3B82F6"} />)}
-        {(d?.subjects ?? []).length === 0 && <StatusBox tone="empty" title="데이터 없음" description="시험 결과가 쌓이면 표시돼요." />}
-      </section>
-    </section>
+  const reviewPlan = useMemo(() => {
+    if (!selectedVariant || !reviewDraft || reviewDraft.decision !== 'revise') {
+      return selectedVariant?.structured_plan || null;
+    }
+    return {
+      ...selectedVariant.structured_plan,
+      teacher_notes: reviewDraft.teacher_notes,
+      student_message: reviewDraft.student_message,
+      next_check_in: {
+        ...(selectedVariant.structured_plan?.next_check_in || {}),
+        date: reviewDraft.next_check_date || selectedVariant.structured_plan?.next_check_in?.date,
+      },
+    };
+  }, [selectedVariant, reviewDraft]);
 
-    {trendData.length > 1 && <section className="panel">
-      <SectionHeader icon={TrendingUp} title="점수 추이" />
-      <ResponsiveContainer width="100%" height={200}>
-        <AreaChart data={trendData}>
-          <defs><linearGradient id="gTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#7C3AED" stopOpacity={0.2} /><stop offset="95%" stopColor="#7C3AED" stopOpacity={0} /></linearGradient></defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11, fill: "#94A3B8" }} /><Tooltip content={<GlassTooltip />} />
-          <Area type="monotone" dataKey="점수" stroke="#7C3AED" fill="url(#gTrend)" strokeWidth={2.5} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 2, stroke: "#fff" }} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </section>}
+  const reviewDiff = useMemo(() => {
+    if (!selectedVariant || !reviewDraft) return [];
+    const changes = [];
+    if (reviewDraft.summary !== selectedVariant.natural_language_summary) {
+      changes.push({
+        field: 'natural_language_summary',
+        before: selectedVariant.natural_language_summary,
+        after: reviewDraft.summary,
+      });
+    }
+    if (reviewDraft.decision === 'revise') {
+      const beforePlan = selectedVariant.structured_plan || {};
+      if ((reviewDraft.teacher_notes || '') !== (beforePlan.teacher_notes || '')) {
+        changes.push({
+          field: 'teacher_notes',
+          before: beforePlan.teacher_notes || '',
+          after: reviewDraft.teacher_notes || '',
+        });
+      }
+      if ((reviewDraft.student_message || '') !== (beforePlan.student_message || '')) {
+        changes.push({
+          field: 'student_message',
+          before: beforePlan.student_message || '',
+          after: reviewDraft.student_message || '',
+        });
+      }
+      if ((reviewDraft.next_check_date || '') !== (beforePlan.next_check_in?.date || '')) {
+        changes.push({
+          field: 'next_check_in.date',
+          before: beforePlan.next_check_in?.date || '',
+          after: reviewDraft.next_check_date || '',
+        });
+      }
+    }
+    return changes;
+  }, [selectedVariant, reviewDraft]);
 
-    <section className="panel">
-      <SectionHeader icon={BookOpen} title="보완 필요 단원" />
-      <div className="three-grid">{(d?.weakUnits ?? []).map((u, i) => <div key={i} style={{ padding: "12px 14px", borderRadius: 14, background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.12)" }}><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{toSubjectLabel(u.subjectCode)} · {u.unitName}</div><ProgressBar value={u.mastery} max={100} color={u.mastery < 50 ? "#EF4444" : "#F59E0B"} height={6} showLabel /></div>)}</div>
-      {(d?.weakUnits ?? []).length === 0 && <StatusBox tone="empty" title="데이터 없음" description="계산되면 표시돼요." />}
-    </section>
-  </div>;
+  // ----- save handlers ----------------------------------------------------
 
-  // ── 결과 입력 탭 ──
-  const resultTab = <div className="page-grid" style={{ marginTop: 14 }}>
-    <section className="two-grid">
-      <section className="panel">
-        <div className="section-header"><h2>📝 시험 결과 입력</h2><button className="ghost-button" type="button" onClick={recalc} style={{ fontSize: 12, padding: "6px 12px" }}><RefreshCw size={12} style={{ marginRight: 4 }} />전략 재계산</button></div>
-        <p className="muted" style={{ marginBottom: 14, fontSize: 13 }}>시험을 고르고 문항별 정오답을 체크하면 점수가 자동 계산돼요.</p>
-        <form className="form-stack" onSubmit={saveResult}>
-          <div className="form-grid">
-            <label className="field"><span>시험</span><select value={rf.exam_id} onChange={(e) => setRf((p) => ({ ...p, exam_id: e.target.value }))}><option value="">선택</option>{(exams.data?.exams ?? []).map((e) => <option key={e.id} value={String(e.id).replace(/^e/, "")}>{e.name}</option>)}</select></label>
-            <label className="field"><span>자동 계산 점수</span><input type="number" value={calcScore} readOnly /></label>
-            <label className="field"><span>백분위</span><input type="number" value={rf.percentile} onChange={(e) => setRf((p) => ({ ...p, percentile: e.target.value }))} placeholder="선택" /></label>
-            <label className="field"><span>등급</span><input type="number" value={rf.grade} onChange={(e) => setRf((p) => ({ ...p, grade: e.target.value }))} placeholder="선택" /></label>
-          </div>
-          {questions.loading && <LoadingPanel title="문항 불러오는 중" />}
-          {(questions.data ?? []).length > 0 && <div className="question-grid">{questions.data.map((q) => { const cur = qr[q.id] ?? { is_correct: false }; return <div className="question-card" key={q.id}><div className="question-card-header"><strong>{q.number}번</strong><span className="muted" style={{ fontSize: 11 }}>{q.points}점 · 난도{q.difficulty}</span></div><div style={{ display: "flex", gap: 6 }}><button type="button" className={`nav-button ${cur.is_correct ? "active" : ""}`} onClick={() => setQr((p) => ({ ...p, [q.id]: { is_correct: true, points: q.points } }))} style={{ flex: 1, fontSize: 12, padding: "7px" }}>✓ 정답</button><button type="button" className={`nav-button ${!cur.is_correct ? "active" : ""}`} onClick={() => setQr((p) => ({ ...p, [q.id]: { is_correct: false, points: q.points } }))} style={{ flex: 1, fontSize: 12, padding: "7px" }}>✗ 오답</button></div></div>; })}</div>}
-          {rf.exam_id && !(questions.data ?? []).length && !questions.loading && <StatusBox tone="empty" title="문항 없음" description="시험 관리에서 문항을 등록해주세요." />}
-          <button className="primary-button" type="submit" disabled={!rf.exam_id}>결과 저장</button>
-        </form>
-        {msg && <StatusBox tone={msg.includes("실패") ? "error" : "info"} title="저장 결과" description={msg} />}
-        {rmsg && <StatusBox tone={rmsg.includes("실패") ? "error" : "info"} title="재계산" description={rmsg} />}
-      </section>
+  const saveProfile = async (event) => {
+    event.preventDefault();
+    if (!profileDraft) return;
+    try {
+      await apiRequest(`/students/${studentId}/profile`, {
+        method: 'PUT',
+        token,
+        body: {
+          grade_level: profileDraft.grade_level,
+          enrollment_status: profileDraft.enrollment_status,
+          weekly_available_hours: Number(profileDraft.weekly_available_hours),
+          preferred_subjects: parseList(profileDraft.preferred_subjects),
+          disliked_subjects: parseList(profileDraft.disliked_subjects),
+          learning_style_preferences: parseList(profileDraft.learning_style_preferences),
+          study_style_notes: profileDraft.study_style_notes,
+        },
+      });
+      showFlash('학생 프로필을 저장했습니다.');
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '학생 프로필 저장에 실패했습니다.');
+    }
+  };
 
-      <section className="table-card">
-        <h2>저장된 시험 결과</h2>
-        {results.loading && <LoadingPanel title="불러오는 중" />}
-        {(results.data ?? []).length === 0 && !results.loading ? <StatusBox tone="empty" title="결과 없음" description="결과를 입력하면 표시돼요." /> : <table><thead><tr><th>시험</th><th>과목</th><th>원점수</th><th>백분위</th><th>등급</th></tr></thead><tbody>{(results.data ?? []).map((r) => <tr key={r.id}><td>{r.exam_name}</td><td>{r.subject_name}</td><td><strong>{formatScore(r.raw_score)}</strong></td><td>{formatPercent(r.percentile)}</td><td>{r.grade ?? "-"}</td></tr>)}</tbody></table>}
-      </section>
-    </section>
-  </div>;
+  const saveGoals = async () => {
+    try {
+      const payload = goalDrafts
+        .filter((goal) => goal.policy_id && goal.target_department)
+        .map((goal, index) => ({
+          policy_id: Number(goal.policy_id),
+          target_department: goal.target_department,
+          priority_order: Number(goal.priority_order || index + 1),
+          is_active: Boolean(goal.is_active),
+          notes: goal.notes || null,
+        }));
+      await apiRequest(`/students/${studentId}/goals`, {
+        method: 'PUT',
+        token,
+        body: payload,
+      });
+      showFlash('목표 대학 우선순위를 저장했습니다.');
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '목표 대학 저장에 실패했습니다.');
+    }
+  };
 
-  return <div className="page-grid">
-    <section className="hero-card">
-      <button className="ghost-button" type="button" onClick={() => navigate(backPath)} style={{ marginBottom: 12, fontSize: 13 }}><ArrowLeft size={14} style={{ marginRight: 4 }} />학생 목록</button>
-      <h1>{d?.student?.name ?? "학생"} 학생 상세</h1>
-      <p className="muted" style={{ fontSize: 15 }}>{d ? `${d.targetGap?.university_name ?? ""} 기준 격차 ${formatScore(d.targetGap?.gap)}` : "분석 중..."}</p>
-      {detail.loading && <LoadingPanel title="불러오는 중" description="진단과 전략을 정리하고 있어요." />}
-      {detail.error && <StatusBox tone="error" title="실패" description={detail.error} />}
-    </section>
-    {!detail.loading && !detail.error && <Tabs defaultTab="diagnosis" tabs={[{ key: "diagnosis", label: "진단 요약", content: diagTab }, { key: "result", label: "결과 입력", badge: (results.data ?? []).length || undefined, content: resultTab }]} />}
-  </div>;
+  const saveHabit = async (event) => {
+    event.preventDefault();
+    try {
+      await apiRequest(`/students/${studentId}/habits`, {
+        method: 'POST',
+        token,
+        body: {
+          ...habitDraft,
+          self_study_ratio: Number(habitDraft.self_study_ratio),
+          lecture_ratio: Number(habitDraft.lecture_ratio),
+          error_note_ratio: Number(habitDraft.error_note_ratio),
+          problem_solving_ratio: Number(habitDraft.problem_solving_ratio),
+          review_habit_score: Number(habitDraft.review_habit_score),
+          consistency_score: Number(habitDraft.consistency_score),
+        },
+      });
+      showFlash('학습 습관 스냅샷을 추가했습니다.');
+      setHabitDraft(emptyHabitDraft);
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '학습 습관 스냅샷 저장에 실패했습니다.');
+    }
+  };
+
+  const runRecalculation = async () => {
+    try {
+      await apiRequest(`/students/${studentId}/recalculate`, { method: 'POST', token });
+      showFlash('학생 진단과 전략을 재계산했습니다.');
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '재계산에 실패했습니다.');
+    }
+  };
+
+  const submitReview = async (event) => {
+    event.preventDefault();
+    if (!selectedVariant || !reviewDraft) return;
+    setReviewSaving(true);
+    try {
+      const body = {
+        decision: reviewDraft.decision,
+        reason: reviewDraft.reason,
+      };
+      if (reviewDraft.decision === 'revise') {
+        body.edited_summary = reviewDraft.summary;
+        body.edited_plan = reviewPlan;
+      }
+      await apiRequest(`/strategies/${selectedVariant.id}/reviews`, { method: 'POST', token, body });
+      const decisionLabel = { approve: '승인', hold: '보류', revise: '수정 후 승인' }[reviewDraft.decision];
+      showFlash(`전략 ${decisionLabel} 처리를 저장했습니다.`);
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '전략 검토 저장에 실패했습니다.');
+    } finally {
+      setReviewSaving(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+
+  const detail = data?.detail;
+  const diagnosisFromOptions = strategyOptions?.diagnosis || null;
+  const approved = strategyOptions?.approved || null;
+  const reviewHistory = strategyOptions?.review_history || [];
+
+  return (
+    <Layout title="학생 상세 진단" backTo="/instructor" backLabel="대시보드로 돌아가기">
+      <div className="toolbar-row">
+        <button type="button" className="secondary-button" onClick={() => reload().catch(() => undefined)}>
+          새로고침
+        </button>
+        <button type="button" onClick={runRecalculation}>
+          재계산 실행
+        </button>
+      </div>
+      {loading ? <div className="empty-state">학생 데이터를 불러오는 중입니다...</div> : null}
+      {error ? <div className="error-box">{error}</div> : null}
+      {pageMessage ? <div className="info-box">{pageMessage}</div> : null}
+      {pageError ? <div className="error-box">{pageError}</div> : null}
+
+      {data && detail ? (
+        <>
+          <SectionCard
+            title={`${detail.student.name} · ${detail.student.class_group || '미배정'}`}
+            subtitle={`재원 상태: ${detail.student.enrollment_status} · 주간 가용 시간 ${detail.student.weekly_available_hours}시간`}
+          >
+            <div className="split-grid">
+              <div>
+                <p>
+                  <strong>선호 과목:</strong> {(detail.student.preferred_subjects || []).join(', ') || '-'}
+                </p>
+                <p>
+                  <strong>비선호 과목:</strong> {(detail.student.disliked_subjects || []).join(', ') || '-'}
+                </p>
+                <p>
+                  <strong>최신 취약 유형:</strong> {weaknessLabel(detail.diagnosis?.primary_weakness_type)}
+                </p>
+              </div>
+              <div>
+                <strong>목표 대학</strong>
+                <ol>
+                  {(detail.goals || []).map((goal) => (
+                    <li key={goal.id}>
+                      {goal.priority_order}. {goal.university_name} {goal.target_department} ({goal.admission_type})
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* ===== 전략 비교 / 검토 (슬라이스 2) ===== */}
+          <SectionCard
+            title="전략 비교 (basic vs conservative)"
+            subtitle="최신 생성본을 나란히 비교하고, 한 variant 를 채택해 검토 / 승인 / 수정합니다."
+          >
+            {diagnosisFromOptions?.low_confidence_flag ? (
+              <div className="info-box warn">
+                <strong>저신뢰 진단입니다.</strong> 추가 데이터(시험 결과, 학습 습관 스냅샷)를 먼저 확보하는 것을 권장합니다.
+                현재 전략은 참고용이며, 학생에게 단정적으로 노출하지 마세요.
+              </div>
+            ) : null}
+
+            {approved ? (
+              <div className="approved-banner">
+                <div>
+                  <span className="status-badge approved">현재 학생 노출본</span>
+                  <strong style={{ marginLeft: '0.5rem' }}>{approved.variant}</strong>
+                  <span className="muted small" style={{ marginLeft: '0.5rem' }}>
+                    승인 시각 기준
+                  </span>
+                </div>
+                <p className="small" style={{ margin: '0.4rem 0 0' }}>
+                  {approved.natural_language_summary}
+                </p>
+              </div>
+            ) : (
+              <div className="info-box">
+                아직 승인된 전략이 없습니다. 아래에서 한 variant 를 채택해 승인 처리를 진행하세요.
+              </div>
+            )}
+
+            {variants.length === 0 ? (
+              <div className="empty-state">
+                생성된 전략이 없습니다. 상단의 “재계산 실행” 버튼을 눌러 진단/전략을 생성하세요.
+              </div>
+            ) : (
+              <div className="strategy-compare-grid">
+                {variants.map((variant) => (
+                  <StrategyCompareCard
+                    key={variant.id}
+                    variant={variant}
+                    isSelected={variant.id === selectedVariantId}
+                    onSelect={() => {
+                      setSelectedVariantId(variant.id);
+                      setReviewDraft(buildReviewDraft(variant));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+
+            {selectedVariant && reviewDraft ? (
+              <form className="review-form stack-gap" onSubmit={submitReview}>
+                <div className="review-form-header">
+                  <strong>채택한 variant: {selectedVariant.variant}</strong>
+                  <StatusBadge status={selectedVariant.status} />
+                  {selectedVariant.is_approved ? <span className="status-badge approved">승인본</span> : null}
+                </div>
+                <div className="form-grid compact-grid">
+                  <label>
+                    결정
+                    <select
+                      value={reviewDraft.decision}
+                      onChange={(event) => setReviewDraft((current) => ({ ...current, decision: event.target.value }))}
+                    >
+                      <option value="approve">승인</option>
+                      <option value="hold">보류</option>
+                      <option value="revise">수정 후 승인</option>
+                    </select>
+                  </label>
+                  <label className="form-span-2">
+                    검토 사유
+                    <textarea
+                      rows={2}
+                      value={reviewDraft.reason}
+                      onChange={(event) => setReviewDraft((current) => ({ ...current, reason: event.target.value }))}
+                    />
+                  </label>
+                  <label className="form-span-2">
+                    자연어 요약
+                    <textarea
+                      rows={3}
+                      value={reviewDraft.summary}
+                      onChange={(event) => setReviewDraft((current) => ({ ...current, summary: event.target.value }))}
+                    />
+                  </label>
+                  {reviewDraft.decision === 'revise' ? (
+                    <>
+                      <label className="form-span-2">
+                        강사용 메모
+                        <textarea
+                          rows={2}
+                          value={reviewDraft.teacher_notes}
+                          onChange={(event) => setReviewDraft((current) => ({ ...current, teacher_notes: event.target.value }))}
+                        />
+                      </label>
+                      <label className="form-span-2">
+                        학생용 코칭 문장
+                        <textarea
+                          rows={2}
+                          value={reviewDraft.student_message}
+                          onChange={(event) => setReviewDraft((current) => ({ ...current, student_message: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        다음 점검 일정
+                        <input
+                          type="date"
+                          value={reviewDraft.next_check_date}
+                          onChange={(event) => setReviewDraft((current) => ({ ...current, next_check_date: event.target.value }))}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+                {reviewDraft.decision === 'revise' ? (
+                  <div className="subtle-card">
+                    <h4>저장될 diff 미리보기</h4>
+                    {reviewDiff.length === 0 ? (
+                      <p className="muted small">현재 수정된 항목이 없습니다. 그대로 저장해도 변경 사항은 기록되지 않습니다.</p>
+                    ) : (
+                      <ul className="diff-list">
+                        {reviewDiff.map((item) => (
+                          <li key={item.field}>
+                            <strong>{item.field}</strong>
+                            <div className="diff-box">
+                              <div>
+                                <span className="small muted">before</span>
+                                <pre>
+                                  {typeof item.before === 'string' ? item.before : JSON.stringify(item.before, null, 2)}
+                                </pre>
+                              </div>
+                              <div>
+                                <span className="small muted">after</span>
+                                <pre>
+                                  {typeof item.after === 'string' ? item.after : JSON.stringify(item.after, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+                <div className="form-actions">
+                  <button type="submit" disabled={reviewSaving}>
+                    {reviewSaving ? '저장 중...' : '검토 저장'}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {reviewHistory.length > 0 ? (
+              <div className="stack-gap">
+                <strong>검토 이력</strong>
+                <ul className="history-list">
+                  {reviewHistory.map((entry) => (
+                    <li key={entry.id}>
+                      <StatusBadge status={entry.decision === 'approve' ? 'approved' : entry.decision === 'hold' ? 'held' : 'pending_review'} label={entry.decision} />
+                      <span className="muted small"> · {entry.variant} · {new Date(entry.reviewed_at).toLocaleString()}</span>
+                      {entry.reason ? <div className="small">{entry.reason}</div> : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </SectionCard>
+
+          {/* ===== 진단 근거 ===== */}
+          <SectionCard title="진단 근거" subtitle="전략 설명이 이 근거 위에서 만들어집니다.">
+            {diagnosisFromOptions ? (
+              <div className="stack-gap">
+                <div className="diagnosis-summary">
+                  <p>
+                    <strong>핵심 취약 유형:</strong> {weaknessLabel(diagnosisFromOptions.primary_weakness_type)}{' '}
+                    <span className="muted small">신뢰도 {Math.round((diagnosisFromOptions.confidence_score || 0) * 100)}%</span>
+                  </p>
+                  <p>
+                    <strong>강사용 설명:</strong> {diagnosisFromOptions.instructor_summary || '-'}
+                  </p>
+                  <p>
+                    <strong>학생용 코칭:</strong> {diagnosisFromOptions.coaching_message || '-'}
+                  </p>
+                </div>
+                <div className="split-grid">
+                  <div>
+                    <strong>취약 단원</strong>
+                    <ul className="bullet-list small">
+                      {(diagnosisFromOptions.weak_units || []).slice(0, 6).map((unit, index) => (
+                        <li key={index}>
+                          {unit.unit_name || `단원 #${unit.unit_id || index}`}
+                          {unit.reason ? ` · ${unit.reason}` : ''}
+                        </li>
+                      ))}
+                      {(diagnosisFromOptions.weak_units || []).length === 0 ? <li className="muted">없음</li> : null}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>근거 시그널 (evidence)</strong>
+                    <ul className="bullet-list small">
+                      {(diagnosisFromOptions.evidence || []).slice(0, 6).map((entry, index) => (
+                        <li key={index}>
+                          {entry.message || entry.signal || entry.label || JSON.stringify(entry)}
+                        </li>
+                      ))}
+                      {(diagnosisFromOptions.evidence || []).length === 0 ? <li className="muted">없음</li> : null}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="muted">진단 결과가 없습니다.</p>
+            )}
+          </SectionCard>
+
+          {/* ===== 단원 mastery ===== */}
+          <SectionCard title="단원 mastery 스냅샷" subtitle="현재값, 최근값, 신뢰도를 함께 봅니다.">
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>단원</th>
+                    <th>effective</th>
+                    <th>current</th>
+                    <th>recent</th>
+                    <th>confidence</th>
+                    <th>문항 수</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(detail.unit_mastery || []).map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.unit?.name || item.unit_name || `단원 #${item.unit_id}`}</td>
+                      <td>{Math.round(item.effective_mastery)}</td>
+                      <td>{Math.round(item.mastery_current)}</td>
+                      <td>{Math.round(item.recent_mastery)}</td>
+                      <td>{item.unit_confidence}</td>
+                      <td>{item.tagged_question_attempt_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+
+          {/* ===== 최근 결과 ===== */}
+          <SectionCard title="최근 결과 기록" subtitle="시험 결과 수정 시 관련 재계산이 이어집니다.">
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>시험</th>
+                    <th>점수</th>
+                    <th>등급</th>
+                    <th>상태</th>
+                    <th>입력 시각</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.results || []).map((result) => {
+                    const exam = examMap.get(result.exam_id);
+                    return (
+                      <tr key={result.id}>
+                        <td>{exam?.name || `시험 #${result.exam_id}`}</td>
+                        <td>{result.raw_score}</td>
+                        <td>{result.grade || '-'}</td>
+                        <td>
+                          <StatusBadge status={result.result_status} />
+                        </td>
+                        <td>{new Date(result.updated_at || result.created_at).toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+
+          {/* ===== 학생 프로필 수정 ===== */}
+          <SectionCard title="학생 프로필 수정" subtitle="주간 시간, 선호 과목, 학습 선호를 구조화해 갱신합니다.">
+            {profileDraft ? (
+              <form className="form-grid" onSubmit={saveProfile}>
+                <label>
+                  학년
+                  <input
+                    value={profileDraft.grade_level}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, grade_level: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  재원 상태
+                  <select
+                    value={profileDraft.enrollment_status}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, enrollment_status: event.target.value }))}
+                  >
+                    <option value="active">active</option>
+                    <option value="paused">paused</option>
+                    <option value="leave">leave</option>
+                    <option value="graduated">graduated</option>
+                    <option value="trial">trial</option>
+                  </select>
+                </label>
+                <label>
+                  주간 가용 시간
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={profileDraft.weekly_available_hours}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, weekly_available_hours: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  선호 과목 (쉼표 구분)
+                  <input
+                    value={profileDraft.preferred_subjects}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, preferred_subjects: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  비선호 과목 (쉼표 구분)
+                  <input
+                    value={profileDraft.disliked_subjects}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, disliked_subjects: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  학습 방식 선호 (쉼표 구분)
+                  <input
+                    value={profileDraft.learning_style_preferences}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, learning_style_preferences: event.target.value }))}
+                    placeholder="self_study, error_note"
+                  />
+                </label>
+                <label className="form-span-2">
+                  학습 스타일 메모
+                  <textarea
+                    rows={3}
+                    value={profileDraft.study_style_notes}
+                    onChange={(event) => setProfileDraft((current) => ({ ...current, study_style_notes: event.target.value }))}
+                  />
+                </label>
+                <div className="form-actions form-span-2">
+                  <button type="submit">프로필 저장</button>
+                </div>
+              </form>
+            ) : null}
+          </SectionCard>
+
+          {/* ===== 목표 대학 ===== */}
+          <SectionCard title="목표 대학 우선순위" subtitle="MVP 전략 계산은 1순위 목표를 기준으로 하되, 다중 목표 데이터 구조를 유지합니다.">
+            <div className="stack-gap">
+              {(goalDrafts || []).map((goal, index) => (
+                <div className="subtle-card" key={index}>
+                  <div className="form-grid compact-grid">
+                    <label>
+                      대학 정책
+                      <select
+                        value={goal.policy_id}
+                        onChange={(event) =>
+                          setGoalDrafts((current) =>
+                            current.map((item, idx) => (idx === index ? { ...item, policy_id: event.target.value } : item))
+                          )
+                        }
+                      >
+                        <option value="">선택</option>
+                        {data.metadata.universities.map((policy) => (
+                          <option key={policy.id} value={policy.id}>
+                            {policy.university_name} · {policy.admission_type}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      목표 학과
+                      <input
+                        value={goal.target_department}
+                        onChange={(event) =>
+                          setGoalDrafts((current) =>
+                            current.map((item, idx) => (idx === index ? { ...item, target_department: event.target.value } : item))
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      우선순위
+                      <input
+                        type="number"
+                        min="1"
+                        value={goal.priority_order}
+                        onChange={(event) =>
+                          setGoalDrafts((current) =>
+                            current.map((item, idx) => (idx === index ? { ...item, priority_order: event.target.value } : item))
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={goal.is_active}
+                        onChange={(event) =>
+                          setGoalDrafts((current) =>
+                            current.map((item, idx) => (idx === index ? { ...item, is_active: event.target.checked } : item))
+                          )
+                        }
+                      />
+                      활성 목표
+                    </label>
+                  </div>
+                </div>
+              ))}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    setGoalDrafts((current) => [
+                      ...current,
+                      { policy_id: '', target_department: '', priority_order: current.length + 1, is_active: true, notes: '' },
+                    ])
+                  }
+                >
+                  목표 추가
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setGoalDrafts((current) => (current.length > 1 ? current.slice(0, -1) : current))}
+                >
+                  마지막 목표 제거
+                </button>
+                <button type="button" onClick={saveGoals}>
+                  목표 저장
+                </button>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* ===== 학습 습관 ===== */}
+          <SectionCard title="학습 습관 스냅샷 추가" subtitle="자습·강의·오답노트·문제풀이 비중과 지속성 지표를 저장합니다.">
+            <form className="form-grid" onSubmit={saveHabit}>
+              <label>
+                최근 학습 방식
+                <input
+                  value={habitDraft.recent_learning_mode}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, recent_learning_mode: event.target.value }))}
+                />
+              </label>
+              <label>
+                자습 비중
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={habitDraft.self_study_ratio}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, self_study_ratio: event.target.value }))}
+                />
+              </label>
+              <label>
+                강의 비중
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={habitDraft.lecture_ratio}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, lecture_ratio: event.target.value }))}
+                />
+              </label>
+              <label>
+                오답노트 비중
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={habitDraft.error_note_ratio}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, error_note_ratio: event.target.value }))}
+                />
+              </label>
+              <label>
+                문제풀이 비중
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={habitDraft.problem_solving_ratio}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, problem_solving_ratio: event.target.value }))}
+                />
+              </label>
+              <label>
+                복습 습관 점수
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={habitDraft.review_habit_score}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, review_habit_score: event.target.value }))}
+                />
+              </label>
+              <label>
+                지속성 점수
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={habitDraft.consistency_score}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, consistency_score: event.target.value }))}
+                />
+              </label>
+              <label className="form-span-2">
+                메모
+                <textarea
+                  rows={3}
+                  value={habitDraft.notes}
+                  onChange={(event) => setHabitDraft((current) => ({ ...current, notes: event.target.value }))}
+                />
+              </label>
+              <div className="form-actions form-span-2">
+                <button type="submit">스냅샷 저장</button>
+              </div>
+            </form>
+          </SectionCard>
+        </>
+      ) : null}
+    </Layout>
+  );
 }

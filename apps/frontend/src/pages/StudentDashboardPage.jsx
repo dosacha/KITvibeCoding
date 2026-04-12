@@ -1,115 +1,257 @@
-// apps/frontend/src/pages/StudentDashboardPage.jsx
-import { Brain, Target, Clock, TrendingUp, BookOpen, AlertTriangle, Lightbulb } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useAuth } from "../contexts/AuthContext.jsx";
-import { apiClient } from "../lib/apiClient.js";
-import { formatPercent, formatScore, toSubjectLabel } from "../lib/formatters.js";
-import { useAsyncData } from "../hooks/useAsyncData.js";
-import { StatCard } from "../components/common/StatCard.jsx";
-import { StatusBox } from "../components/common/StatusBox.jsx";
-import { LoadingPanel } from "../components/common/LoadingPanel.jsx";
-import { AIBadge, SectionHeader, ProgressBar, GlassTooltip } from "../components/common/VisualParts.jsx";
-import { FirstVisitHint } from "../components/feedback/FirstVisitHint.jsx";
+import Layout from '../components/Layout.jsx';
+import MetricCard from '../components/MetricCard.jsx';
+import SectionCard from '../components/SectionCard.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAsyncData } from '../hooks/useAsyncData.js';
+import { apiRequest } from '../lib/api.js';
 
-export function StudentDashboardPage() {
-  const { session } = useAuth();
-  const { data, error, loading } = useAsyncData(() => apiClient.getStudentDashboard(session.accessToken), [session.accessToken]);
+function weaknessLabel(value) {
+  const map = {
+    concept_gap: '개념 보강 필요',
+    transfer_weakness: '응용·전이 연습 필요',
+    precision_accuracy: '정확도 향상 필요',
+    time_pressure: '시간 관리 강화 필요',
+    instability: '성취 안정화 필요',
+    persistence_risk: '학습 지속성 강화 필요',
+  };
+  return map[value] || value || '-';
+}
 
-  const gap = data?.targetGap;
-  const strat = data?.strategy;
-  const diag = data?.diagnosis;
-  const timeAlloc = (strat?.timeAllocation ?? []).map((i) =>
-    `${toSubjectLabel(String(i.subject_code ?? i.subjectCode ?? "-"))} ${formatPercent(i.ratio_percent ?? i.ratioPercent)}`
+// study_methods 항목이 문자열 또는 {label, detail, method, ...} 객체를 모두 수용한다.
+function renderStudyMethod(item, index) {
+  if (!item) return null;
+  if (typeof item === 'string') {
+    return <li key={index}>{item}</li>;
+  }
+  const label = item.label || item.method || `방법 ${index + 1}`;
+  const detail = item.detail || item.description || item.message;
+  return (
+    <li key={index} className="study-method-item">
+      <strong>{label}</strong>
+      {detail ? <span className="study-method-detail">{detail}</span> : null}
+    </li>
   );
-  const trendData = (data?.student?.recentExams ?? []).map((e) => ({
-    name: e.name?.slice(0, 4) ?? "", 점수: e.totalScore ?? e.raw_score ?? 0,
-  }));
+}
+
+// weekly_time_allocation이 배열 또는 객체 두 가지 shape를 모두 처리한다.
+function renderWeeklyAllocation(allocation) {
+  if (!allocation) return <p className="muted small">배분 정보가 없습니다.</p>;
+
+  if (Array.isArray(allocation)) {
+    if (allocation.length === 0) return <p className="muted small">배분 정보가 없습니다.</p>;
+    return (
+      <ul>
+        {allocation.map((item, index) => (
+          <li key={`${item?.subject_name ?? index}`}>
+            <strong>{item?.subject_name || '과목'}</strong>
+            {item?.hours != null ? `: ${item.hours}시간` : ''}
+            {item?.focus ? ` · ${item.focus}` : ''}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  // Object shape {focus_hours, review_hours, mock_hours, notes}
+  return (
+    <ul>
+      {allocation.focus_hours != null ? <li>핵심 보강: {allocation.focus_hours}시간</li> : null}
+      {allocation.review_hours != null ? <li>복습: {allocation.review_hours}시간</li> : null}
+      {allocation.mock_hours != null ? <li>모의 시험: {allocation.mock_hours}시간</li> : null}
+      {allocation.notes ? <li className="small muted">{allocation.notes}</li> : null}
+    </ul>
+  );
+}
+
+function renderRisk(risk, index) {
+  if (!risk) return null;
+  if (typeof risk === 'string') return <li key={index}>{risk}</li>;
+  const label = risk.label || risk.type || `위험 요인 ${index + 1}`;
+  const message = risk.message || risk.reason || risk.detail;
+  return (
+    <li key={index} className="study-method-item">
+      <strong>{label}</strong>
+      {message ? <span className="study-method-detail">{message}</span> : null}
+    </li>
+  );
+}
+
+export default function StudentDashboardPage() {
+  const { token } = useAuth();
+  const { data, loading, error } = useAsyncData(
+    async () => (await apiRequest('/frontend/dashboard/student', { token })).data,
+    [token]
+  );
+
+  const plan = data?.approved_strategy?.plan;
 
   return (
-    <div className="page-grid">
-      {/* 그라데이션 히어로 */}
-      <section className="hero-card" style={{
-        background: "linear-gradient(135deg, rgba(59,130,246,0.88), rgba(124,58,237,0.82))",
-        color: "#fff", border: "1px solid rgba(255,255,255,0.2)",
-        boxShadow: "0 12px 40px rgba(59,130,246,0.25)",
-      }}>
-        <FirstVisitHint id="student-welcome" title="나의 학습 전략 화면이에요" description="AI가 분석한 진단 결과와 맞춤 전략을 확인할 수 있어요." />
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <span style={{ padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)" }}>AI 진단</span>
-          <span style={{ padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)" }}>맞춤 전략</span>
-          {gap?.university_name && <span style={{ padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)" }}>{gap.university_name}</span>}
-        </div>
-        <h1 style={{ color: "#fff" }}>{data?.student?.name ?? session.user.name}님, 지금 해야 할 공부</h1>
-        <p style={{ fontSize: 15, opacity: 0.9, marginTop: 6 }}>
-          {gap ? `${gap.university_name ?? "목표 대학"} 기준 현재 ${formatScore(gap.weighted_score)}, 목표까지 ${formatScore(gap.gap)} 차이` : "현재 위치를 분석하고 있어요."}
-        </p>
-        {loading && <div style={{ marginTop: 10, opacity: 0.8 }}>불러오는 중...</div>}
-        {error && <StatusBox tone="error" title="불러오기 실패" description={error} />}
-      </section>
+    <Layout title="내 학습 전략">
+      {loading ? <div className="empty-state">맞춤 전략을 준비하는 중입니다...</div> : null}
+      {error ? <div className="error-box">{error}</div> : null}
+      {data ? (
+        <>
+          <div className="metric-grid">
+            <MetricCard
+              label="주간 가용 시간"
+              value={`${data.student?.weekly_available_hours ?? '-'}시간`}
+            />
+            <MetricCard
+              label="1순위 목표 대학"
+              value={
+                data.primary_goal
+                  ? `${data.primary_goal.university_name} ${data.primary_goal.target_department}`
+                  : '미설정'
+              }
+            />
+            <MetricCard
+              label="전략 승인 상태"
+              value={data.approved_strategy ? '승인 완료' : '검토 중'}
+              hint={data.review_notice || '승인된 전략만 이 화면에 표시됩니다.'}
+            />
+          </div>
 
-      {/* 핵심 수치 */}
-      <section className="stats-grid">
-        <StatCard icon={Brain} label="현재 진단" value={diag?.primaryWeaknessType ? toSubjectLabel(diag.primaryWeaknessType) : "진단 대기"} description="최근 시험 기반 분석" color="#7C3AED" />
-        <StatCard icon={Target} label="집중 과목" value={(strat?.prioritySubjects ?? []).slice(0, 2).map((i) => toSubjectLabel(String(i.subject_code ?? i.subjectCode ?? "-"))).join(" · ") || "-"} description="목표 대학 반영 고려" color="#3B82F6" />
-        <StatCard icon={Clock} label="시간 배분" value={timeAlloc[0] ?? "-"} description="이번 주 시작점" color="#F59E0B" />
-      </section>
+          <SectionCard
+            title="현재 학습 진단"
+            subtitle="강점을 유지하면서 목표 대학에 필요한 영역을 함께 강화합니다."
+          >
+            {data.diagnosis ? (
+              <div className="stack-gap">
+                <div className="info-box">
+                  <strong>핵심 방향:</strong> {weaknessLabel(data.diagnosis.primary_weakness_type)}
+                  {data.diagnosis.coaching_message ? (
+                    <p style={{ marginTop: '0.4rem', marginBottom: 0 }}>
+                      {data.diagnosis.coaching_message}
+                    </p>
+                  ) : null}
+                </div>
 
-      {/* AI 전략 요약 */}
-      {strat?.studentSummary && (
-        <section className="hero-card" style={{ border: "1px solid rgba(124,58,237,0.18)", background: "linear-gradient(135deg, rgba(124,58,237,0.05), rgba(255,255,255,0.45))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><AIBadge /><span style={{ fontSize: 15, fontWeight: 700 }}>나의 학습 전략</span></div>
-          <p style={{ fontSize: 14, color: "#475569", margin: 0, lineHeight: 1.75 }}>{strat.studentSummary}</p>
-        </section>
-      )}
+                {data.diagnosis.weak_subjects?.length > 0 ? (
+                  <div>
+                    <strong>집중 보완 과목</strong>
+                    <ul>
+                      {data.diagnosis.weak_subjects.map((subject) => (
+                        <li key={subject.subject_code}>
+                          {subject.subject_name}
+                          {subject.gap_score != null ? ` · 목표까지 ${subject.gap_score}점` : ''}
+                          {subject.stability != null ? ` · 안정도 ${subject.stability}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
-      {/* 근거 + 보완 단원 */}
-      <section className="two-grid">
-        <section className="panel">
-          <SectionHeader icon={Lightbulb} title="왜 이런 전략을 제안할까요?" />
-          {(diag?.evidence ?? []).length > 0 ? diag.evidence.map((e, i) => (
-            <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 12, background: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.35)", fontSize: 13, color: "#475569", lineHeight: 1.6 }}>{e.reason ?? "근거 확인 중"}</div>
-          )) : <StatusBox tone="empty" title="근거 수집 중" description="진단 데이터가 쌓이면 표시돼요." />}
-        </section>
-        <section className="panel">
-          <SectionHeader icon={BookOpen} title="먼저 보완할 단원" />
-          {(strat?.priorityUnits ?? []).map((u, i) => (
-            <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 12, background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.12)", fontSize: 13 }}>{u.unit_name ?? u.unitName ?? "-"}</div>
-          ))}
-          {(strat?.priorityUnits ?? []).length === 0 && <StatusBox tone="empty" title="계산 중" description="계산 후 표시돼요." />}
-        </section>
-      </section>
+                {data.diagnosis.weak_units?.length > 0 ? (
+                  <div>
+                    <strong>집중 보완 단원</strong>
+                    <ul>
+                      {data.diagnosis.weak_units.map((unit, index) => (
+                        <li key={`${unit.unit_name}-${index}`}>
+                          {unit.subject_name} · {unit.unit_name}
+                          {unit.effective_mastery != null
+                            ? ` (현재 ${Math.round(unit.effective_mastery)}점)`
+                            : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
-      {/* 성장 추이 + 시간 배분 */}
-      <section className="two-grid">
-        {trendData.length > 1 && (
-          <section className="panel">
-            <SectionHeader icon={TrendingUp} title="나의 성장 추이" />
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={trendData}>
-                <defs><linearGradient id="gStu" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#7C3AED" stopOpacity={0.2} /><stop offset="95%" stopColor="#7C3AED" stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11, fill: "#94A3B8" }} /><Tooltip content={<GlassTooltip />} />
-                <Area type="monotone" dataKey="점수" stroke="#7C3AED" fill="url(#gStu)" strokeWidth={2.5} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 2, stroke: "#fff" }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </section>
-        )}
-        <section className="panel">
-          <SectionHeader icon={Clock} title="추천 시간 배분" />
-          {timeAlloc.length > 0 ? timeAlloc.map((t2, i) => (
-            <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 12, background: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.35)", fontSize: 13 }}>{t2}</div>
-          )) : <StatusBox tone="empty" title="계산 중" description="" />}
-        </section>
-      </section>
+                {data.diagnosis.low_confidence_flag ? (
+                  <div className="info-box warn">
+                    아직 데이터가 충분히 쌓이지 않았습니다. 시험 결과와 학습 기록이 더 쌓이면 전략 정확도가 높아집니다.
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted">진단 데이터가 아직 없습니다. 시험 결과를 입력하면 맞춤 진단이 시작됩니다.</p>
+            )}
+          </SectionCard>
 
-      {/* 피해야 할 패턴 */}
-      {(strat?.antiPatterns ?? []).length > 0 && (
-        <section className="panel">
-          <SectionHeader icon={AlertTriangle} title="피하면 좋은 공부 방식" />
-          {strat.antiPatterns.map((p, i) => (
-            <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 12, background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.10)", fontSize: 13, color: "#475569" }}>{p}</div>
-          ))}
-        </section>
-      )}
-    </div>
+          <SectionCard
+            title="강사 승인 학습 전략"
+            subtitle="담당 강사가 검토하고 승인한 전략입니다."
+          >
+            {data.approved_strategy && plan ? (
+              <div className="stack-gap">
+                {data.approved_strategy.summary ? (
+                  <p style={{ fontSize: '0.97rem', lineHeight: 1.6 }}>{data.approved_strategy.summary}</p>
+                ) : null}
+
+                <div className="split-grid">
+                  <div>
+                    <h4>주간 학습 배분</h4>
+                    {renderWeeklyAllocation(plan.weekly_time_allocation)}
+                  </div>
+                  <div>
+                    <h4>다음 점검 일정</h4>
+                    <p>
+                      {plan.next_check_in?.date || '미정'}
+                      {plan.next_check_in?.days != null
+                        ? ` (${plan.next_check_in.days}일 후)`
+                        : ''}
+                    </p>
+                    {plan.next_check_in?.reason || plan.next_check_in?.note ? (
+                      <p className="muted small">
+                        {plan.next_check_in.reason || plan.next_check_in.note}
+                      </p>
+                    ) : (
+                      <p className="muted small">다음 시험 및 학습 진척도를 확인합니다.</p>
+                    )}
+                  </div>
+                </div>
+
+                {(plan.unit_study_order || []).length > 0 ? (
+                  <div>
+                    <h4>단원 학습 순서</h4>
+                    <ol>
+                      {(plan.unit_study_order || []).map((item, index) => {
+                        if (typeof item === 'string') return <li key={index}>{item}</li>;
+                        return (
+                          <li key={`${item?.unit_name ?? index}`}>
+                            {item?.subject_name ? `${item.subject_name} · ` : ''}
+                            {item?.unit_name || item?.label || `단원 ${index + 1}`}
+                            {item?.effective_mastery != null
+                              ? ` (현재 ${Math.round(item.effective_mastery)}점)`
+                              : ''}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                ) : null}
+
+                <div className="split-grid">
+                  {(plan.study_methods || []).length > 0 ? (
+                    <div>
+                      <h4>추천 학습 방식</h4>
+                      <ul>{(plan.study_methods || []).map(renderStudyMethod)}</ul>
+                    </div>
+                  ) : null}
+
+                  {(plan.risk_factors || []).length > 0 ? (
+                    <div>
+                      <h4>주의할 점</h4>
+                      <ul>{(plan.risk_factors || []).map(renderRisk)}</ul>
+                    </div>
+                  ) : null}
+                </div>
+
+                {data.approved_strategy.student_coaching || plan.student_message ? (
+                  <div className="info-box">
+                    <strong>강사 코칭 메시지</strong>
+                    <p style={{ marginTop: '0.4rem', marginBottom: 0 }}>
+                      {data.approved_strategy.student_coaching || plan.student_message}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted">{data.review_notice || '강사가 전략을 검토 중입니다. 승인 후 이 화면에서 확인할 수 있습니다.'}</p>
+            )}
+          </SectionCard>
+        </>
+      ) : null}
+    </Layout>
   );
 }

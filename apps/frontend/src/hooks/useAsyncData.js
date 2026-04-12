@@ -1,38 +1,28 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from 'react';
 
-export function useAsyncData(loader, deps) {
+export function useAsyncData(loader, deps = []) {
   const [data, setData] = useState(null);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
+  const [error, setError] = useState('');
 
-  const reload = useCallback(() => {
-    setReloadKey((previous) => previous + 1);
-  }, []);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const next = await loader();
+      setData(next);
+      return next;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, deps);
 
   useEffect(() => {
-    let cancelled = false;
+    reload().catch(() => undefined);
+  }, [reload]);
 
-    async function run() {
-      try {
-        setLoading(true);
-        const nextData = await loader();
-        if (cancelled) return;
-        setData(nextData);
-        setError("");
-      } catch (loadError) {
-        if (cancelled) return;
-        setError(loadError instanceof Error ? loadError.message : "데이터를 불러오지 못했어.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [...deps, reloadKey]);
-
-  return { data, error, loading, setData, reload };
+  return { data, loading, error, reload, setData };
 }

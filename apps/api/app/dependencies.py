@@ -1,38 +1,38 @@
+from __future__ import annotations
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from .config import get_settings
 from .db import get_db
-from .models import User
+from .models import Role, User
+from .security import decode_access_token
 
 
-bearer_scheme = HTTPBearer(auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="로그인이 필요해.")
-    settings = get_settings()
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="로그인 정보가 만료되었거나 올바르지 않아.") from exc
-    user_id = payload.get("sub")
-    user = db.get(User, int(user_id)) if user_id else None
+        payload = decode_access_token(token)
+        user_id = int(payload.get("sub"))
+    except Exception as exc:  # noqa: BLE001
+        raise credentials_error from exc
+    user = db.get(User, user_id)
     if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="사용자 정보를 찾지 못했어.")
+        raise credentials_error
     return user
 
 
-def require_roles(*roles):
+def require_roles(*roles: Role):
     def dependency(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="이 화면을 볼 권한이 없어.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
         return current_user
 
     return dependency

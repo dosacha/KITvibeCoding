@@ -1,128 +1,137 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from statistics import mean, pstdev
+from statistics import pstdev
+from typing import Any
 
-from sqlalchemy.orm import Session
+from ..models import (
+    LearningHabitSnapshot,
+    StudentProfile,
+    StudentResult,
+    Subject,
+    TargetUniversityProfile,
+    UnitMasteryCurrent,
+)
 
-from ..models import Exam, Question, QuestionUnitMapping, StudentProfile, StudentResult, Subject, TargetUniversityProfile, UniversityScorePolicy, Unit
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
-def _safe_growth(values: list[float]) -> float:
-    if len(values) < 2 or values[0] == 0:
+def normalize_result_score(result: StudentResult) -> float:
+    total_score = result.exam.total_score or 100
+    if total_score <= 0:
         return 0.0
-    return round((values[-1] - values[0]) / values[0], 4)
+    return round((result.raw_score / total_score) * 100, 2)
 
 
-def _stability_index(values: list[float]) -> float:
-    if len(values) <= 1:
-        return 1.0
-    deviation = pstdev(values)
-    return round(max(0.0, 1 - (deviation / 30)), 4)
+def build_feature_snapshot(
+    *,
+    student: StudentProfile,
+    results: list[StudentResult],
+    mastery_records: list[UnitMasteryCurrent],
+    primary_goal: TargetUniversityProfile | None,
+    latest_habit: LearningHabitSnapshot | None,
+) -> dict[str, Any]:
+    subject_results: dict[str, list[float]] = defaultdict(list)
+    subject_dates: dict[str, list[str]] = defaultdict(list)
+    subject_names: dict[str, str] = {}
+    for result in sorted(results, key=lambda item: item.exam.exam_date):
+        code = result.subject.code
+        subject_names[code] = result.subject.name
+        subject_results[code].append(normalize_result_score(result))
+        subject_dates[code].append(result.exam.exam_date.isoformat())
 
-
-def build_student_features(db: Session, student_profile: StudentProfile) -> dict:
-    results = db.query(StudentResult).filter(StudentResult.student_profile_id == student_profile.id).order_by(StudentResult.created_at.asc()).all()
-    subjects = {subject.id: subject for subject in db.query(Subject).all()}
-    questions = {question.id: question for question in db.query(Question).all()}
-
-    subject_scores: dict[str, list[float]] = defaultdict(list)
-    unit_attempts: dict[int, list[float]] = defaultdict(list)
-    question_error_rates: dict[int, dict] = defaultdict(lambda: {"wrong": 0, "total": 0})
-    type_score_map: dict[str, list[float]] = defaultdict(list)
-
-    for result in results:
-        subject = subjects[result.subject_id]
-        subject_scores[subject.code].append(result.raw_score)
-        for qid_str, answer in (result.question_breakdown or {}).items():
-            qid = int(qid_str)
-            question_error_rates[qid]["total"] += 1
-            if not answer.get("is_correct", False):
-                question_error_rates[qid]["wrong"] += 1
-            question = questions.get(qid)
-            if not question:
-                continue
-            type_score_map[question.question_type].append(1.0 if answer.get("is_correct", False) else 0.0)
-            for mapping in db.query(QuestionUnitMapping).filter(QuestionUnitMapping.question_id == qid).all():
-                unit_attempts[mapping.unit_id].append(1.0 if answer.get("is_correct", False) else 0.0)
-
-    latest_scores = {code: scores[-1] for code, scores in subject_scores.items()}
-    score_trends = {code: scores for code, scores in subject_scores.items()}
-    growth_rates = {code: _safe_growth(scores) for code, scores in subject_scores.items()}
-    stability_index = _stability_index([score for scores in subject_scores.values() for score in scores]) if subject_scores else 0.0
-
-    units = {unit.id: unit for unit in db.query(Unit).all()}
-    unit_mastery = []
-    for unit_id, attempts in unit_attempts.items():
-        unit = units.get(unit_id)
-        if not unit:
-            continue
-        unit_mastery.append(
+    mastery_by_subject: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for mastery in mastery_records:
+        mastery_by_subject[mastery.subject.code].append(
             {
-                "unit_id": unit_id,
-                "unit_name": unit.name,
-                "subject_id": unit.subject_id,
-                "mastery": round(mean(attempts) * 100, 2) if attempts else 0.0,
-                "attempts": len(attempts),
-                "prerequisite_unit_id": unit.prerequisite_unit_id,
+                "unit_id": mastery.unit_id,
+                "unit_name": mastery.unit.name,
+                "effective_mastery": round(mastery.effective_mastery, 2),
+                "confidence": round(mastery.unit_confidence, 2),
+                "attempt_count": mastery.attempt_count,
             }
         )
-    unit_mastery.sort(key=lambda item: item["mastery"])
 
-    error_rates = []
-    for question_id, counts in question_error_rates.items():
-        question = questions.get(question_id)
-        if not question or counts["total"] == 0:
-            continue
-        error_rates.append(
-            {
-                "question_id": question_id,
-                "question_number": question.number,
-                "exam_id": question.exam_id,
-                "question_type": question.question_type,
-                "error_rate": round(counts["wrong"] / counts["total"], 4),
-            }
-        )
-    error_rates.sort(key=lambda item: item["error_rate"], reverse=True)
+    policy_weights = primary_goal.policy.subject_weights if primary_goal else {}
+    target_score = primary_goal.policy.target_score if primary_goal else 85.0
 
-    target_gap = {}
-    if student_profile.target_university_profile_id:
-        target_profile = db.get(TargetUniversityProfile, student_profile.target_university_profile_id)
-        if target_profile:
-            policy = db.get(UniversityScorePolicy, target_profile.policy_id)
-            if policy:
-                weighted_score = 0.0
-                covered_weight = 0.0
-                for subject_code, weight in (policy.subject_weights or {}).items():
-                    if subject_code in latest_scores:
-                        weighted_score += latest_scores[subject_code] * weight
-                        covered_weight += weight
-                normalized = round(weighted_score / covered_weight, 2) if covered_weight else 0.0
-                target_gap = {
-                    "policy_id": policy.id,
-                    "university_name": policy.university_name,
-                    "admission_type": policy.admission_type,
-                    "weighted_score": normalized,
-                    "target_score": policy.target_score,
-                    "gap": round(policy.target_score - normalized, 2),
-                    "subject_weights": policy.subject_weights or {},
-                }
+    subject_features: dict[str, Any] = {}
+    for code, scores in subject_results.items():
+        latest_score = scores[-1]
+        previous_score = scores[-2] if len(scores) >= 2 else latest_score
+        trend = latest_score - previous_score
+        growth_rate = (scores[-1] - scores[0]) / max(len(scores) - 1, 1)
+        variability = pstdev(scores) if len(scores) >= 2 else 0.0
+        stability = _clamp(1.0 - (variability / 25.0), 0.0, 1.0)
+        confidence = _clamp(len(scores) / 4.0, 0.0, 1.0)
+        mastery_values = [item["effective_mastery"] for item in mastery_by_subject.get(code, [])]
+        avg_mastery = sum(mastery_values) / len(mastery_values) if mastery_values else latest_score
+        readiness = round(0.6 * latest_score + 0.4 * avg_mastery, 2)
+        gap_score = max(0.0, target_score - readiness)
+        subject_features[code] = {
+            "subject_name": subject_names.get(code, code),
+            "history": scores,
+            "history_dates": subject_dates.get(code, []),
+            "latest_score": round(latest_score, 2),
+            "trend": round(trend, 2),
+            "growth_rate": round(growth_rate, 2),
+            "stability": round(stability, 2),
+            "confidence": round(confidence, 2),
+            "average_mastery": round(avg_mastery, 2),
+            "current_readiness": readiness,
+            "gap_score": round(gap_score, 2),
+            "admission_weight": float(policy_weights.get(subject_names.get(code, code), policy_weights.get(code, 0.5))),
+            "weak_units": sorted(mastery_by_subject.get(code, []), key=lambda item: item["effective_mastery"])[:4],
+        }
 
-    preferred_codes = []
-    if student_profile.user:
-        subject_code_map = {subject.id: subject.code for subject in subjects.values()}
-        preferred_codes = [subject_code_map[sid] for sid in student_profile.user.preferred_subject_ids if sid in subject_code_map]
+    average_confidence = sum(item["confidence"] for item in subject_features.values()) / max(len(subject_features), 1)
+    average_stability = sum(item["stability"] for item in subject_features.values()) / max(len(subject_features), 1)
+    latest_consistency = latest_habit.consistency_score if latest_habit else 50.0
+    review_score = latest_habit.review_habit_score if latest_habit else 50.0
 
     return {
-        "latest_scores": latest_scores,
-        "score_trends": score_trends,
-        "growth_rates": growth_rates,
-        "unit_mastery": unit_mastery,
-        "stability_index": stability_index,
-        "question_error_rates": error_rates[:10],
-        "type_accuracy": {k: round(mean(v) * 100, 2) for k, v in type_score_map.items()},
-        "preferred_subjects": preferred_codes,
-        "target_gap": target_gap,
-        "exam_count": len(results),
+        "student": {
+            "student_id": student.id,
+            "grade_level": student.grade_level,
+            "enrollment_status": student.enrollment_status.value,
+            "weekly_available_hours": student.weekly_available_hours,
+            "preferred_subjects": student.preferred_subjects,
+            "disliked_subjects": student.disliked_subjects,
+            "learning_style_preferences": student.learning_style_preferences,
+        },
+        "goal": None
+        if not primary_goal
+        else {
+            "goal_id": primary_goal.id,
+            "university_name": primary_goal.policy.university_name,
+            "admission_type": primary_goal.policy.admission_type,
+            "target_department": primary_goal.target_department,
+            "priority_order": primary_goal.priority_order,
+            "target_score": primary_goal.policy.target_score,
+            "subject_weights": primary_goal.policy.subject_weights,
+            "required_subjects": primary_goal.policy.required_subjects,
+        },
+        "subjects": subject_features,
+        "habits": {
+            "recent_learning_mode": latest_habit.recent_learning_mode if latest_habit else "mixed",
+            "self_study_ratio": latest_habit.self_study_ratio if latest_habit else 0.25,
+            "lecture_ratio": latest_habit.lecture_ratio if latest_habit else 0.25,
+            "error_note_ratio": latest_habit.error_note_ratio if latest_habit else 0.25,
+            "problem_solving_ratio": latest_habit.problem_solving_ratio if latest_habit else 0.25,
+            "review_habit_score": review_score,
+            "consistency_score": latest_consistency,
+        },
+        "overall": {
+            "exam_count": len(results),
+            "subject_count": len(subject_features),
+            "average_confidence": round(average_confidence, 2),
+            "average_stability": round(average_stability, 2),
+            "low_data": len(results) < 2 or average_confidence < 0.45,
+            "average_gap": round(
+                sum(item["gap_score"] for item in subject_features.values()) / max(len(subject_features), 1),
+                2,
+            ),
+        },
     }
-

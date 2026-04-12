@@ -1,165 +1,352 @@
-// apps/frontend/src/pages/InstructorDashboardPage.jsx
-import { Users, AlertTriangle, TrendingUp, Brain, Target, ChevronRight, Sparkles } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useAuth } from "../contexts/AuthContext.jsx";
-import { useRouter } from "../router/hashRouter.js";
-import { apiClient } from "../lib/apiClient.js";
-import { formatPercent, formatScore, toWeaknessLabel } from "../lib/formatters.js";
-import { useAsyncData } from "../hooks/useAsyncData.js";
-import { StatCard } from "../components/common/StatCard.jsx";
-import { StatusBox } from "../components/common/StatusBox.jsx";
-import { LoadingPanel } from "../components/common/LoadingPanel.jsx";
-import { AIBadge, WeaknessBadge, PriorityBadge, ProgressBar, SectionHeader, GlassTooltip } from "../components/common/VisualParts.jsx";
-import { FirstVisitHint } from "../components/feedback/FirstVisitHint.jsx";
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import Layout from '../components/Layout.jsx';
+import MetricCard from '../components/MetricCard.jsx';
+import SectionCard from '../components/SectionCard.jsx';
+import StatusBadge from '../components/StatusBadge.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAsyncData } from '../hooks/useAsyncData.js';
+import { apiRequest } from '../lib/api.js';
 
-export function InstructorDashboardPage() {
-  const { session } = useAuth();
-  const { pathname, navigate } = useRouter();
-  const bp = pathname.startsWith("/admin") ? "/admin/students" : "/teacher/students";
-  const { data, error, loading } = useAsyncData(() => apiClient.getInstructorDashboard(session.accessToken), [session.accessToken]);
+const WEAKNESS_LABEL = {
+  concept_gap: '개념 결손형',
+  transfer_weakness: '적용 전이 약형',
+  precision_accuracy: '정확도 부족형',
+  time_pressure: '시간 압박형',
+  instability: '편차 큰 불안정형',
+  persistence_risk: '지속성 취약형',
+};
 
-  const pri = data?.consultPriorityStudents?.[0];
-  const latest = data?.examTrend?.length ? data.examTrend[data.examTrend.length - 1] : null;
-  const wDist = (data?.weaknessDistribution ?? []).filter((w) => w.count > 0);
-  const avgTr = (data?.examTrend ?? []).map((e) => ({ name: e.name?.slice(0, 4) ?? "", 평균: e.averageScore }));
-  const highCount = (data?.consultPriorityStudents ?? []).filter((s) => s.consultPriority === "high").length;
+const WEAKNESS_TONE = {
+  concept_gap: 'tone-red',
+  transfer_weakness: 'tone-orange',
+  precision_accuracy: 'tone-yellow',
+  time_pressure: 'tone-purple',
+  instability: 'tone-blue',
+  persistence_risk: 'tone-gray',
+};
+
+function weaknessLabel(value) {
+  return WEAKNESS_LABEL[value] || value || '-';
+}
+
+const REVIEW_PRIORITY = {
+  pending_review: 0,
+  draft: 1,
+  held: 2,
+  approved: 3,
+  archived: 4,
+};
+
+function strategySortKey(student) {
+  const status = student.latest_strategy_status;
+  if (student.low_confidence_flag) return -1;
+  if (status in REVIEW_PRIORITY) return REVIEW_PRIORITY[status];
+  return 99;
+}
+
+export default function InstructorDashboardPage() {
+  const { token, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [classFilter, setClassFilter] = useState('all');
+
+  const { data, loading, error } = useAsyncData(
+    async () => {
+      const [dashboardResponse, students] = await Promise.all([
+        apiRequest('/frontend/dashboard/instructor', { token }),
+        apiRequest('/frontend/students', { token }),
+      ]);
+      return { dashboard: dashboardResponse.data, students };
+    },
+    [token]
+  );
+
+  const dashboard = data?.dashboard;
+  const allStudents = data?.students || [];
+
+  const classOptions = useMemo(() => {
+    const set = new Map();
+    allStudents.forEach((student) => {
+      const key = student.class_group_name || '미배정';
+      set.set(key, (set.get(key) || 0) + 1);
+    });
+    return Array.from(set.entries()).map(([name, count]) => ({ name, count }));
+  }, [allStudents]);
+
+  const filteredStudents = useMemo(() => {
+    if (classFilter === 'all') return allStudents;
+    return allStudents.filter(
+      (student) => (student.class_group_name || '미배정') === classFilter
+    );
+  }, [allStudents, classFilter]);
+
+  const sortedStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => strategySortKey(a) - strategySortKey(b));
+  }, [filteredStudents]);
+
+  const lowConfidenceCount = useMemo(
+    () => allStudents.filter((student) => student.low_confidence_flag).length,
+    [allStudents]
+  );
+  const needsReviewCount = useMemo(
+    () =>
+      allStudents.filter(
+        (student) =>
+          student.latest_strategy_status &&
+          ['pending_review', 'draft', 'held'].includes(student.latest_strategy_status)
+      ).length,
+    [allStudents]
+  );
+
+  const pageTitle = isAdmin ? '운영 대시보드' : '학생 진단 · 전략';
+  const pageSubtitle = isAdmin
+    ? '전체 학생 현황과 검토 대기 전략을 관리합니다.'
+    : '검토가 필요한 학생이 상단에 표시됩니다. AI 전략을 확인하고 승인하세요.';
 
   return (
-    <div className="page-grid">
-      {/* 히어로 */}
-      <section className="hero-card">
-        <FirstVisitHint id="instructor-welcome" title="강사 대시보드입니다" description="우선 상담 학생, 취약 유형, 시험 추이를 한눈에 확인하세요. 학생 이름을 클릭하면 상세 화면으로 이동해요." />
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><AIBadge /><span style={{ fontSize: 11, color: "#94A3B8" }}>실시간 분석</span></div>
-        <h1>오늘 먼저 볼 학생과 상담 포인트</h1>
-        <p className="muted" style={{ fontSize: 15 }}>우선 상담 학생, 취약 유형, 시험 흐름을 한눈에 확인할 수 있어요.</p>
-        {loading ? <LoadingPanel title="요약을 불러오는 중" description="학생 진단을 정리하고 있어요." /> : null}
-        {error ? <StatusBox tone="error" title="불러오기 실패" description={error} /> : null}
-      </section>
+    <Layout title={pageTitle}>
+      {loading ? <div className="empty-state">대시보드를 불러오는 중입니다...</div> : null}
+      {error ? <div className="error-box">{error}</div> : null}
 
-      {/* 핵심 수치 */}
-      <section className="stats-grid">
-        <StatCard icon={Users} label="관리 학생" value={`${data?.consultPriorityStudents?.length ?? "-"}명`} description={highCount > 0 ? `우선 상담 ${highCount}명` : "등록 기준"} color="#3B82F6" />
-        <StatCard icon={AlertTriangle} label="우선 상담" value={pri?.name ?? "-"} description={pri ? `격차 ${formatScore(pri.gapScore)}` : "없음"} color="#EF4444" />
-        <StatCard icon={TrendingUp} label="최근 평균" value={latest ? formatScore(latest.averageScore) : "-"} description={latest?.name ?? ""} color="#10B981" />
-        <StatCard icon={Brain} label="주요 취약 유형" value={wDist[0]?.label ?? "-"} description="최근 진단 기준" color="#7C3AED" />
-      </section>
+      {dashboard ? (
+        <>
+          {lowConfidenceCount > 0 ? (
+            <div className="info-box warn">
+              현재 <strong>{lowConfidenceCount}</strong>명의 학생이 저신뢰 진단 상태입니다. 추가 시험 결과나 학습 기록 입력을 우선하세요.
+            </div>
+          ) : null}
 
-      {/* 상담 우선 학생 + 평균 추이 차트 */}
-      <section className="two-grid">
-        <section className="panel">
-          <SectionHeader icon={AlertTriangle} title="상담 우선 학생" subtitle="목표 대비 갭이 크거나 변동이 큰 학생" />
-          {(data?.consultPriorityStudents ?? []).length === 0 && !loading ? (
-            <StatusBox tone="empty" title="표시할 학생이 없어요" description="데이터가 쌓이면 표시돼요." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {(data?.consultPriorityStudents ?? []).slice(0, 5).map((s) => (
-                <div key={s.id} onClick={() => navigate(`${bp}/${s.id}`)} className="list-item-hover" style={{
-                  display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 14,
-                  background: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.35)",
-                  cursor: "pointer", transition: "all 0.2s",
-                  backdropFilter: "blur(12px)",
-                }}>
-                  <div style={{ width: 38, height: 38, borderRadius: 12, background: "#3B82F615", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#3B82F6", fontSize: 15 }}>{s.name[0]}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                      <strong style={{ fontSize: 14 }}>{s.name}</strong>
-                      <PriorityBadge priority={s.consultPriority} />
-                    </div>
-                    <div style={{ fontSize: 12, color: "#94A3B8" }}>{s.targetUniv ?? ""} · 갭 {formatScore(s.gapScore)}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {(s.weaknessTypes ?? []).slice(0, 2).map((wt) => <WeaknessBadge key={wt} typeId={wt} small />)}
-                  </div>
-                  <ChevronRight size={14} color="#94A3B8" />
-                </div>
+          <p className="muted small" style={{ marginBottom: '0.5rem' }}>{pageSubtitle}</p>
+
+          <div className="metric-grid">
+            <MetricCard label="담당 반" value={dashboard.summary.class_group_count} hint="담당 반 수" />
+            <MetricCard label="학생 수" value={dashboard.summary.student_count} hint="접근 가능한 학생" />
+            <MetricCard label="검토 대기" value={needsReviewCount} hint="초안 · 검토 대기 · 보류" />
+            <MetricCard label="저신뢰 진단" value={lowConfidenceCount} hint="추가 데이터 필요" />
+          </div>
+
+          <SectionCard
+            title="학생 목록"
+            subtitle="검토 대기 및 저신뢰 학생이 상단에 먼저 보입니다."
+          >
+            <div className="dashboard-filter-row">
+              <span className="small muted">반:</span>
+              <button
+                type="button"
+                className={`secondary-button compact${classFilter === 'all' ? ' active' : ''}`}
+                onClick={() => setClassFilter('all')}
+              >
+                전체 ({allStudents.length})
+              </button>
+              {classOptions.map((option) => (
+                <button
+                  key={option.name}
+                  type="button"
+                  className={`secondary-button compact${classFilter === option.name ? ' active' : ''}`}
+                  onClick={() => setClassFilter(option.name)}
+                >
+                  {option.name} ({option.count})
+                </button>
               ))}
             </div>
-          )}
-        </section>
+            <div className="table-wrapper">
+              <table className="dense-table">
+                <thead>
+                  <tr>
+                    <th>학생</th>
+                    <th>반</th>
+                    <th>1순위 목표</th>
+                    <th>취약 유형</th>
+                    <th>전략 상태</th>
+                    <th>신뢰도</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted small">
+                        선택한 필터에 해당하는 학생이 없습니다.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {sortedStudents.map((student) => (
+                    <tr key={student.id}>
+                      <td>
+                        <Link to={`/students/${student.id}`}>{student.full_name}</Link>
+                      </td>
+                      <td className="small muted">{student.class_group_name || '미배정'}</td>
+                      <td className="small">{student.primary_goal || '-'}</td>
+                      <td>
+                        {student.latest_weakness ? (
+                          <span
+                            className={`chip-item small ${WEAKNESS_TONE[student.latest_weakness] || ''}`}
+                          >
+                            {weaknessLabel(student.latest_weakness)}
+                          </span>
+                        ) : (
+                          <span className="muted small">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {student.latest_strategy_status ? (
+                          <StatusBadge status={student.latest_strategy_status} />
+                        ) : (
+                          <span className="muted small">없음</span>
+                        )}
+                      </td>
+                      <td>
+                        {student.low_confidence_flag ? (
+                          <span className="status-badge unanswered">저신뢰</span>
+                        ) : (
+                          <span className="muted small">보통 이상</span>
+                        )}
+                      </td>
+                      <td>
+                        <Link to={`/students/${student.id}`} className="secondary-button compact">
+                          상세
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
 
-        <section className="panel">
-          <SectionHeader icon={TrendingUp} title="전체 평균 추이" subtitle="최근 시험별 반 평균" />
-          {avgTr.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={avgTr}>
-                <defs>
-                  <linearGradient id="gAvg" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#7C3AED" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#7C3AED" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                <YAxis domain={[40, 100]} tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                <Tooltip content={<GlassTooltip />} />
-                <Area type="monotone" dataKey="평균" stroke="#7C3AED" strokeWidth={2.5} fill="url(#gAvg)" dot={{ r: 4, fill: "#7C3AED", strokeWidth: 2, stroke: "#fff" }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <StatusBox tone="empty" title="시험 데이터 없음" description="시험 결과가 쌓이면 추이를 보여드려요." />
-          )}
-        </section>
-      </section>
+          {(dashboard.class_groups || []).map((group) => {
+            const groupTotal =
+              group.weakness_distribution.reduce((sum, item) => sum + item.count, 0) || 1;
+            return (
+              <SectionCard
+                key={group.class_group_id ?? group.class_group_name}
+                title={group.class_group_name}
+                subtitle={`학생 ${group.student_count}명 · 취약 유형 분포, 군집, 보강/반이동 추천`}
+              >
+                <div className="dashboard-group-grid">
+                  <div className="stack-gap">
+                    <h4>취약 유형 분포</h4>
+                    {group.weakness_distribution.length > 0 ? (
+                      <div className="bar-list">
+                        {group.weakness_distribution.map((item) => {
+                          const percent = Math.round((item.count / groupTotal) * 100);
+                          return (
+                            <div key={item.weakness_type} className="bar-row">
+                              <div className="bar-meta">
+                                <span
+                                  className={`chip-item small ${WEAKNESS_TONE[item.weakness_type] || ''}`}
+                                >
+                                  {weaknessLabel(item.weakness_type)}
+                                </span>
+                                <strong>
+                                  {item.count}명{' '}
+                                  <span className="muted small">({percent}%)</span>
+                                </strong>
+                              </div>
+                              <div className="bar-track">
+                                <div
+                                  className={`bar-fill ${WEAKNESS_TONE[item.weakness_type] || ''}`}
+                                  style={{ width: `${percent}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="muted small">아직 진단 데이터가 없습니다.</p>
+                    )}
 
-      {/* 취약 유형 분포 + 보완 단원 */}
-      <section className="two-grid">
-        <section className="panel">
-          <SectionHeader icon={Brain} title="취약 유형 분포" subtitle="전체 학생 진단 결과" />
-          {wDist.length > 0 ? wDist.map((w, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-              <span style={{ fontSize: 20, width: 28, textAlign: "center" }}>
-                {({ "개념 이해 보완 필요": "🧩", "계산 실수 주의": "🔢", "시간 관리 보완 필요": "⏱️", "선행 개념 보완 필요": "🔗", "문제 유형 편중": "📊", "성적 흐름 불안정": "📈" })[w.label] ?? "📊"}
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{w.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED" }}>{w.count}명</span>
+                    <h4>취약 유형 군집</h4>
+                    {group.weakness_clusters.length > 0 ? (
+                      <div className="stack-gap">
+                        {group.weakness_clusters.map((cluster) => (
+                          <div className="cluster-row" key={cluster.label}>
+                            <span
+                              className={`chip-item small ${WEAKNESS_TONE[cluster.label] || ''}`}
+                            >
+                              {weaknessLabel(cluster.label)}
+                            </span>
+                            <span className="muted small">{cluster.count}명</span>
+                            <div className="cluster-students">
+                              {(cluster.students || []).map((name) => (
+                                <span className="chip-item small" key={name}>
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted small">군집 데이터가 아직 없습니다.</p>
+                    )}
+                  </div>
+
+                  <div className="stack-gap">
+                    <h4>보강 후보 추천</h4>
+                    {group.remediation_candidates.length > 0 ? (
+                      <div className="recommendation-list">
+                        {group.remediation_candidates.map((candidate) => (
+                          <div className="recommendation-row" key={candidate.student_id}>
+                            <Link to={`/students/${candidate.student_id}`}>
+                              <strong>{candidate.student_name}</strong>
+                            </Link>
+                            <p className="small muted">{candidate.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted small">현재 추천 후보가 없습니다.</p>
+                    )}
+
+                    <h4>반 이동 추천</h4>
+                    {group.class_move_suggestions.length > 0 ? (
+                      <div className="recommendation-list">
+                        {group.class_move_suggestions.map((suggestion) => (
+                          <div
+                            className={`recommendation-row direction-${suggestion.direction}`}
+                            key={`${suggestion.student_id}-${suggestion.direction}`}
+                          >
+                            <div className="recommendation-head">
+                              <Link to={`/students/${suggestion.student_id}`}>
+                                <strong>{suggestion.student_name}</strong>
+                              </Link>
+                              <span
+                                className={`chip-item small direction-chip direction-${suggestion.direction}`}
+                              >
+                                {suggestion.suggestion}
+                              </span>
+                            </div>
+                            <p className="small muted">{suggestion.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted small">자동 확정 없이 설명형 추천만 제공합니다.</p>
+                    )}
+                  </div>
                 </div>
-                <ProgressBar value={w.count} max={Math.max(...wDist.map((x) => x.count), 1)} color="#7C3AED" height={6} />
-              </div>
-            </div>
-          )) : <StatusBox tone="empty" title="데이터 수집 중" description="진단 결과가 쌓이면 표시돼요." />}
-        </section>
 
-        <section className="panel">
-          <SectionHeader icon={Target} title="보완 필요 단원 TOP 5" subtitle="이해도 낮은 단원" />
-          {(data?.weakUnits ?? []).slice(0, 5).map((u, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-              <span style={{
-                width: 24, height: 24, borderRadius: 8,
-                background: i < 2 ? "#EF444412" : "#F59E0B12",
-                color: i < 2 ? "#EF4444" : "#F59E0B",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontWeight: 800,
-              }}>{i + 1}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 3 }}>{u.unitName}</div>
-                <ProgressBar value={u.mastery} max={100} color={u.mastery < 50 ? "#EF4444" : u.mastery < 65 ? "#F59E0B" : "#3B82F6"} height={5} />
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: u.mastery < 50 ? "#EF4444" : "#475569" }}>{formatPercent(u.mastery)}</span>
-            </div>
-          ))}
-          {(data?.weakUnits ?? []).length === 0 && !loading && <StatusBox tone="empty" title="데이터 없음" description="단원별 이해도가 계산되면 표시돼요." />}
-        </section>
-      </section>
-
-      {/* AI 전략 요약 */}
-      {(data?.recentStrategies ?? []).length > 0 && (
-        <section className="panel">
-          <SectionHeader icon={Sparkles} title="최근 AI 전략 요약" action={<AIBadge />} />
-          <div className="three-grid">
-            {data.recentStrategies.slice(0, 3).map((item, i) => (
-              <div key={i} style={{
-                padding: 16, borderRadius: 16,
-                background: "linear-gradient(135deg, rgba(124,58,237,0.05), rgba(255,255,255,0.3))",
-                border: "1px solid rgba(124,58,237,0.12)",
-              }}>
-                <p style={{ fontSize: 13, color: "#475569", margin: 0, lineHeight: 1.65 }}>{item.summary}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
+                <div className="stack-gap consultation-block">
+                  <h4>상담용 설명 문장</h4>
+                  {group.consultation_sentences.length > 0 ? (
+                    <ul className="consultation-list">
+                      {group.consultation_sentences.map((sentence, index) => (
+                        <li key={index} className="small">
+                          {sentence}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted small">상담 문장이 아직 생성되지 않았습니다.</p>
+                  )}
+                </div>
+              </SectionCard>
+            );
+          })}
+        </>
+      ) : null}
+    </Layout>
   );
 }

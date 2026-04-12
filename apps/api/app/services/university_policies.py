@@ -1,88 +1,72 @@
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session, joinedload
 
-from ..models import UniversityScorePolicy
+from ..models import RecalculationTrigger, Role, TargetUniversityProfile, UniversityScorePolicy, User
 from ..schemas import UniversityPolicyCreate, UniversityPolicyUpdate
-from .audit import log_audit, log_change
+from .analytics import process_recalculation_job
+from .audit import queue_recalculation, record_audit, record_changes
 
 
-def list_policies(db: Session) -> list[UniversityScorePolicy]:
-    return db.query(UniversityScorePolicy).order_by(UniversityScorePolicy.university_name.asc(), UniversityScorePolicy.id.asc()).all()
+def list_policies(db: Session, *, current_user: User) -> list[UniversityScorePolicy]:
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can view university policies.")
+    return db.query(UniversityScorePolicy).order_by(UniversityScorePolicy.university_name.asc(), UniversityScorePolicy.academic_year.desc()).all()
 
 
-def create_policy(db: Session, payload: UniversityPolicyCreate, actor_user_id: int | None) -> UniversityScorePolicy:
+def create_policy(db: Session, *, payload: UniversityPolicyCreate, current_user: User) -> UniversityScorePolicy:
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create university policies.")
     policy = UniversityScorePolicy(**payload.model_dump())
     db.add(policy)
     db.flush()
-
-    log_audit(
-        db,
-        actor_user_id=actor_user_id,
-        entity_type="university_score_policy",
-        entity_id=policy.id,
-        action="create",
-        payload={
-            "university_name": policy.university_name,
-            "admission_type": policy.admission_type,
-            "target_score": policy.target_score,
-        },
-    )
-    log_change(
-        db,
-        entity_type="university_score_policy",
-        entity_id=policy.id,
-        field_name="created",
-        old_value=None,
-        new_value=policy.university_name,
-        changed_by_user_id=actor_user_id,
-    )
+    record_audit(db, actor_user_id=current_user.id, entity_type="university_score_policies", entity_id=policy.id, action="create", payload=payload.model_dump(mode="json"))
     db.commit()
     db.refresh(policy)
     return policy
 
 
-def update_policy(
-    db: Session,
-    policy: UniversityScorePolicy,
-    payload: UniversityPolicyUpdate,
-    actor_user_id: int | None,
-) -> UniversityScorePolicy:
-    changes: list[tuple[str, str | None, str | None]] = []
-
-    for field_name, new_value in payload.model_dump(exclude_unset=True).items():
-        old_value = getattr(policy, field_name)
-        if old_value == new_value:
-            continue
-        setattr(policy, field_name, new_value)
-        changes.append((field_name, _stringify(old_value), _stringify(new_value)))
-
-    if changes:
-        log_audit(
+def update_policy(db: Session, *, policy_id: int, payload: UniversityPolicyUpdate, current_user: User) -> tuple[UniversityScorePolicy, list[int]]:
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update university policies.")
+    policy = (
+        db.query(UniversityScorePolicy)
+        .options(joinedload(UniversityScorePolicy.target_profiles))
+        .filter(UniversityScorePolicy.id == policy_id)
+        .one_or_none()
+    )
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="University policy not found.")
+    before = {
+        "academic_year": policy.academic_year,
+        "university_name": policy.university_name,
+        "admission_type": policy.admission_type,
+        "subject_weights": policy.subject_weights,
+        "required_subjects": policy.required_subjects,
+        "bonus_rules": policy.bonus_rules,
+        "grade_conversion_rules": policy.grade_conversion_rules,
+        "target_score": policy.target_score,
+        "notes": policy.notes,
+    }
+    updates = payload.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(policy, key, value)
+    db.flush()
+    record_changes(db, actor_user_id=current_user.id, entity_type="university_score_policies", entity_id=policy.id, before=before, after={**before, **updates})
+    record_audit(db, actor_user_id=current_user.id, entity_type="university_score_policies", entity_id=policy.id, action="update", payload=updates)
+    affected_student_ids = sorted({target.student_profile_id for target in policy.target_profiles if target.is_active})
+    if affected_student_ids:
+        job = queue_recalculation(
             db,
-            actor_user_id=actor_user_id,
-            entity_type="university_score_policy",
+            entity_type="university_score_policies",
             entity_id=policy.id,
-            action="update",
-            payload={field_name: new_value for field_name, _, new_value in changes},
+            trigger=RecalculationTrigger.POLICY_CHANGED,
+            scope={"student_ids": affected_student_ids, "policy_id": policy.id},
+            requested_by_user_id=current_user.id,
         )
-        for field_name, old_value, new_value in changes:
-            log_change(
-                db,
-                entity_type="university_score_policy",
-                entity_id=policy.id,
-                field_name=field_name,
-                old_value=old_value,
-                new_value=new_value,
-                changed_by_user_id=actor_user_id,
-            )
-
+        db.flush()
+        process_recalculation_job(db, job)
     db.commit()
     db.refresh(policy)
-    return policy
-
-
-def _stringify(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
+    return policy, affected_student_ids
