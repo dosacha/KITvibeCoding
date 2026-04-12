@@ -1,32 +1,89 @@
-import argparse
+from __future__ import annotations
 
-from app.db import initialize_database
-from app.seed import seed
+import argparse
+from pathlib import Path
+
+from sqlalchemy import inspect, text
+
+from app.db import Base, engine, init_schema
+from app.seed import seed_demo_data
+
+
+LEGACY_COLUMN_SPECS = {
+    "student_profiles": {
+        "enrollment_status": "VARCHAR(20) DEFAULT 'active'",
+        "weekly_available_hours": "FLOAT DEFAULT 12",
+        "preferred_subjects": "JSON",
+        "disliked_subjects": "JSON",
+        "learning_style_preferences": "JSON",
+    },
+    "exams": {
+        "class_group_id": "INTEGER",
+        "time_limit_minutes": "INTEGER DEFAULT 60",
+        "is_retake": "BOOLEAN DEFAULT 0",
+    },
+    "questions": {
+        "teacher_difficulty": "INTEGER DEFAULT 3",
+        "answer_key": "VARCHAR(30)",
+        "problem_style": "VARCHAR(60) DEFAULT 'mixed'",
+    },
+    "student_results": {
+        "result_status": "VARCHAR(20) DEFAULT 'submitted'",
+        "updated_at": "DATETIME",
+    },
+}
+
+
+def run_compatibility_migrations() -> None:
+    init_schema()
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as connection:
+        for table_name, columns in LEGACY_COLUMN_SPECS.items():
+            if table_name not in existing_tables:
+                continue
+            existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            for column_name, ddl in columns.items():
+                if column_name in existing_columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
+        if "questions" in existing_tables:
+            question_columns = {column["name"] for column in inspector.get_columns("questions")}
+            if "difficulty" in question_columns and "teacher_difficulty" in question_columns:
+                connection.execute(text("UPDATE questions SET teacher_difficulty = COALESCE(teacher_difficulty, difficulty)"))
+
+
+def reset_schema() -> None:
+    from app import models  # noqa: F401
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="UnitFlow 데이터베이스 관리 도구")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    subparsers.add_parser("init", help="현재 DATABASE_URL 기준으로 스키마를 생성")
-    subparsers.add_parser("reset", help="현재 DATABASE_URL 기준으로 스키마를 초기화")
-    subparsers.add_parser("seed", help="초기화 후 예시 데이터를 채움")
-
+    parser = argparse.ArgumentParser(description="UnitFlow AI DB manager")
+    parser.add_argument("command", choices=["init", "reset", "seed", "migrate"])
     args = parser.parse_args()
 
     if args.command == "init":
-        initialize_database()
-        print("데이터베이스 스키마 생성을 마쳤어.")
+        init_schema()
+        print("schema initialized")
         return
-
     if args.command == "reset":
-        initialize_database(reset=True)
-        print("데이터베이스 스키마 초기화를 마쳤어.")
+        reset_schema()
+        print("schema reset")
         return
-
+    if args.command == "migrate":
+        run_compatibility_migrations()
+        print("compatibility migration completed")
+        return
     if args.command == "seed":
-        seed()
-        print("예시 데이터 적재를 마쳤어.")
+        run_compatibility_migrations()
+        from app.db import SessionLocal
+
+        with SessionLocal() as session:
+            seed_demo_data(session)
+        print("seed completed")
 
 
 if __name__ == "__main__":

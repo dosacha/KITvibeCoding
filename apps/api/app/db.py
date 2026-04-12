@@ -1,48 +1,35 @@
+from __future__ import annotations
+
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from .config import get_settings
+from .config import settings
 
 
 class Base(DeclarativeBase):
     pass
 
 
-settings = get_settings()
+def _create_engine(database_url: str):
+    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    return create_engine(database_url, future=True, pool_pre_ping=True, connect_args=connect_args)
 
 
-def is_sqlite_url(database_url: str) -> bool:
-    return database_url.startswith("sqlite")
+engine = _create_engine(settings.database_url)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True, expire_on_commit=False)
 
 
-def is_postgres_url(database_url: str) -> bool:
-    return database_url.startswith("postgresql") or database_url.startswith("postgres")
-
-
-connect_args = {"check_same_thread": False} if is_sqlite_url(settings.database_url) else {}
-engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-
-
-def validate_database_configuration() -> None:
-    if settings.app_env.lower() == "production" and is_sqlite_url(settings.database_url):
-        raise RuntimeError("운영 환경에서는 SQLite 대신 PostgreSQL 같은 서버형 데이터베이스를 사용해야 해.")
-
-
-def initialize_database(*, reset: bool = False) -> None:
-    from .models import Academy  # noqa: F401
-
-    validate_database_configuration()
-    if reset:
-        Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
+def get_db() -> Generator:
+    session = SessionLocal()
     try:
-        yield db
+        yield session
     finally:
-        db.close()
+        session.close()
+
+
+def init_schema() -> None:
+    from . import models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
