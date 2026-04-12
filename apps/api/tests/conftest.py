@@ -11,7 +11,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 API_ROOT = TESTS_DIR.parent
 sys.path.insert(0, str(API_ROOT))
 
-TEST_DB_PATH = Path('/tmp/unitflow_test.sqlite3')
+TEST_DB_PATH = API_ROOT / '.tmp' / 'unitflow_test.sqlite3'
+TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 os.environ['DATABASE_URL'] = f'sqlite:///{TEST_DB_PATH}'
 os.environ['AUTO_CREATE_SCHEMA'] = 'false'
 os.environ['JWT_SECRET'] = 'unitflow-test-secret-key-12345678901234567890'
@@ -33,7 +34,10 @@ def seeded_db():
 
 def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     if TEST_DB_PATH.exists():
-        TEST_DB_PATH.unlink(missing_ok=True)
+        try:
+            TEST_DB_PATH.unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
 
 @pytest.fixture()
