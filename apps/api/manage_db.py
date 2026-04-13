@@ -13,9 +13,21 @@ LEGACY_COLUMN_SPECS = {
     "student_profiles": {
         "enrollment_status": "VARCHAR(20) DEFAULT 'active'",
         "weekly_available_hours": "FLOAT DEFAULT 12",
+        "weekday_available_hours": "FLOAT DEFAULT 8",
+        "weekend_available_hours": "FLOAT DEFAULT 4",
+        "preferred_study_window": "VARCHAR(30)",
         "preferred_subjects": "JSON",
         "disliked_subjects": "JSON",
         "learning_style_preferences": "JSON",
+        "student_goal_note": "TEXT",
+        "last_self_updated_at": "DATETIME",
+    },
+    "learning_habit_snapshots": {
+        "preferred_session_minutes": "INTEGER DEFAULT 35",
+        "preferred_study_slot": "VARCHAR(30)",
+        "self_reported_obstacles_json": "JSON",
+        "planner_followthrough_score": "FLOAT DEFAULT 50",
+        "last_reflection_excerpt": "TEXT",
     },
     "exams": {
         "class_group_id": "INTEGER",
@@ -30,6 +42,25 @@ LEGACY_COLUMN_SPECS = {
     "student_results": {
         "result_status": "VARCHAR(20) DEFAULT 'submitted'",
         "updated_at": "DATETIME",
+    },
+    "student_diagnoses": {
+        "admission_direction_snapshot_id": "INTEGER",
+        "goal_readiness_snapshot_id": "INTEGER",
+        "confidence_level": "VARCHAR(20) DEFAULT 'MEDIUM'",
+        "coaching_summary": "TEXT",
+        "low_confidence_reason_json": "JSON",
+    },
+    "student_strategies": {
+        "plan_schema_version": "INTEGER DEFAULT 2",
+        "source_goal_id": "INTEGER",
+    },
+    "strategy_reviews": {
+        "workspace_id": "INTEGER",
+        "review_scope": "VARCHAR(40) DEFAULT 'AI_VARIANT'",
+        "student_visible_message": "TEXT",
+        "instructor_private_note": "TEXT",
+        "diff_summary_json": "JSON",
+        "visible_to_student": "BOOLEAN DEFAULT 1",
     },
 }
 
@@ -51,6 +82,12 @@ def run_compatibility_migrations() -> None:
             question_columns = {column["name"] for column in inspector.get_columns("questions")}
             if "difficulty" in question_columns and "teacher_difficulty" in question_columns:
                 connection.execute(text("UPDATE questions SET teacher_difficulty = COALESCE(teacher_difficulty, difficulty)"))
+        if "student_diagnoses" in existing_tables:
+            connection.execute(text("UPDATE student_diagnoses SET confidence_level = 'MEDIUM' WHERE confidence_level IS NULL OR confidence_level = 'medium'"))
+        if "strategy_reviews" in existing_tables:
+            connection.execute(text("UPDATE strategy_reviews SET review_scope = 'AI_VARIANT' WHERE review_scope IS NULL OR review_scope = 'ai_variant'"))
+        if "student_strategies" in existing_tables:
+            connection.execute(text("UPDATE student_strategies SET plan_schema_version = 2 WHERE plan_schema_version IS NULL"))
 
 
 def reset_schema() -> None:
