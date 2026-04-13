@@ -9,6 +9,10 @@ from .time_utils import current_utc_year
 from .models import (
     Academy,
     ClassGroup,
+    CommunityExam,
+    CommunityExamAnswer,
+    CommunityExamQuestion,
+    CommunityExamSubmission,
     Exam,
     EnrollmentStatus,
     LearningHabitSnapshot,
@@ -378,4 +382,38 @@ def seed_demo_data(db: Session) -> None:
                 diff={},
             )
             db.add(review)
+
+    community_exam = CommunityExam(
+        created_by_student_profile_id=students[0].id,
+        title="Student shared math mini mock",
+        subject_name="MATH",
+        source_kind="student_shared",
+        exam_date=date(2026, 4, 8),
+        question_count=3,
+        choice_count=5,
+        description="Seeded demo exam for the student community flow.",
+    )
+    db.add(community_exam)
+    db.flush()
+    for number, answer_key in enumerate(["1", "3", "5"], start=1):
+        db.add(CommunityExamQuestion(exam_id=community_exam.id, question_number=number, answer_key=answer_key))
+    db.flush()
+    demo_choices = {
+        students[0].id: ["1", "2", "5"],
+        students[1].id: ["1", "3", "4"],
+    }
+    key_map = {1: "1", 2: "3", 3: "5"}
+    for student_id, choices in demo_choices.items():
+        submission = CommunityExamSubmission(exam_id=community_exam.id, student_profile_id=student_id)
+        db.add(submission)
+        db.flush()
+        for question_number, selected in enumerate(choices, start=1):
+            db.add(
+                CommunityExamAnswer(
+                    submission_id=submission.id,
+                    question_number=question_number,
+                    selected_choice=selected,
+                    is_correct=selected == key_map[question_number],
+                )
+            )
     db.commit()

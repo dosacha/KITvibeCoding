@@ -148,6 +148,7 @@ function WorkspaceStructuredEditor({ workspace, token, onSaved, onRecommend }) {
   }));
   const [saving, setSaving] = useState(false);
   const [recommending, setRecommending] = useState(false);
+  const [lastRecommendedFields, setLastRecommendedFields] = useState([]);
   const { message, isError, flash, flashError } = useFlashMessage(5000);
 
   const setTop = (key, val) => setForm((prev) => ({ ...prev, [key]: val }));
@@ -234,10 +235,24 @@ function WorkspaceStructuredEditor({ workspace, token, onSaved, onRecommend }) {
         token,
         body: { student_note: form.student_note || null },
       });
-      // 추천 결과를 form에 머지
-      if (res.subject_allocations) setTop('subject_allocations', res.subject_allocations);
-      if (res.unit_priorities) setTop('unit_priorities', res.unit_priorities);
-      if (res.today_focus_items) setTop('today_focus_items', res.today_focus_items);
+      const suggestion = res.suggested_workspace || res;
+      const nextSubjectAllocations = suggestion.subject_allocations || suggestion.weekly_time_allocation;
+      const nextUnitPriorities = suggestion.unit_priorities || suggestion.unit_study_order;
+      const nextTodayFocusItems = suggestion.today_focus_items;
+      const changed = [];
+      if (nextSubjectAllocations && JSON.stringify(nextSubjectAllocations) !== JSON.stringify(form.subject_allocations)) {
+        setTop('subject_allocations', nextSubjectAllocations);
+        changed.push('과목별 시간 배분');
+      }
+      if (nextUnitPriorities && JSON.stringify(nextUnitPriorities) !== JSON.stringify(form.unit_priorities)) {
+        setTop('unit_priorities', nextUnitPriorities);
+        changed.push('우선 학습 단원');
+      }
+      if (nextTodayFocusItems && JSON.stringify(nextTodayFocusItems) !== JSON.stringify(form.today_focus_items)) {
+        setTop('today_focus_items', nextTodayFocusItems);
+        changed.push('오늘 핵심 할 일');
+      }
+      setLastRecommendedFields(changed);
       flash('AI 추천을 반영했어. 수정 후 저장해줘.');
       onRecommend?.();
     } catch (err) {
@@ -427,6 +442,13 @@ function WorkspaceStructuredEditor({ workspace, token, onSaved, onRecommend }) {
         <p className={isError ? 'error-text' : 'muted small'}>{message}</p>
       ) : null}
 
+      {lastRecommendedFields.length > 0 ? (
+        <div className="info-box">
+          <strong>AI 추천으로 바뀐 항목</strong>
+          <p style={{ margin: '0.25rem 0 0' }}>{lastRecommendedFields.join(', ')}</p>
+        </div>
+      ) : null}
+
       <div className="workspace-editor-actions">
         <button type="button" onClick={save} disabled={saving}>
           {saving ? '저장 중...' : '초안 저장'}
@@ -479,7 +501,7 @@ function ReviewTimeline({ timeline }) {
 
 // ── 메인 페이지 ─────────────────────────────────────────────────
 
-const TABS = ['AI 기본안', 'AI 보수안', '내 초안', '채팅', '검토 상태'];
+const TABS = ['내 초안', '강사 승인본', 'AI 기본안', 'AI 보수안', '채팅', '검토 상태'];
 
 export default function StudentStrategyWorkspacePage() {
   const { token } = useAuth();
@@ -534,6 +556,13 @@ export default function StudentStrategyWorkspacePage() {
             <div className={submitIsError ? 'error-box' : 'info-box'}>{submitMsg}</div>
           ) : null}
 
+          <div className="info-box">
+            <strong>내 초안은 내가 바꾸는 작업본, 강사 승인본은 공식 기준이야.</strong>
+            <p style={{ margin: '0.3rem 0 0' }}>
+              AI 기본안과 보수안은 비교용 대안이고, 대화창에서는 AI 코치·강사·둘 모두 중 대상을 골라 물어볼 수 있어.
+            </p>
+          </div>
+
           {/* 탭 */}
           <div className="workspace-tabs">
             {TABS.map((tab) => (
@@ -551,14 +580,14 @@ export default function StudentStrategyWorkspacePage() {
 
           {/* AI 기본안 */}
           {activeTab === 'AI 기본안' ? (
-            <SectionCard title="AI 기본 전략" subtitle="AI가 짜준 기본 플랜">
+            <SectionCard title="AI 기본 전략" subtitle="목표 gap과 취약 단원을 기준으로 만든 첫 대안">
               <StrategyReadView strategy={data.ai_basic} />
             </SectionCard>
           ) : null}
 
           {/* AI 보수안 */}
           {activeTab === 'AI 보수안' ? (
-            <SectionCard title="AI 보수 전략" subtitle="부담 줄인 대안 플랜">
+            <SectionCard title="AI 보수 전략" subtitle="실행 부담을 줄인 안전한 대안">
               <StrategyReadView strategy={data.ai_conservative} />
             </SectionCard>
           ) : null}
@@ -567,7 +596,7 @@ export default function StudentStrategyWorkspacePage() {
           {activeTab === '내 초안' ? (
             <SectionCard
               title="내 전략 초안"
-              subtitle="직접 수정 가능 — 저장 후 즉시 반영돼"
+              subtitle="내가 직접 고치는 개인 작업본. 공식 승인본과 따로 유지돼"
               actions={
                 canSubmit ? (
                   <button
@@ -601,9 +630,19 @@ export default function StudentStrategyWorkspacePage() {
             </SectionCard>
           ) : null}
 
+          {activeTab === '강사 승인본' ? (
+            <SectionCard title="강사 승인본" subtitle="플래너와 공식 코칭 기준으로 쓰는 현재 승인 전략">
+              {data.coach_approved_strategy ? (
+                <StrategyReadView strategy={data.coach_approved_strategy} />
+              ) : (
+                <div className="empty-state">아직 강사 승인본이 없어. 내 초안을 저장하고 검토를 요청해봐.</div>
+              )}
+            </SectionCard>
+          ) : null}
+
           {/* 채팅 */}
           {activeTab === '채팅' ? (
-            <SectionCard title="강사 · AI 코치와 대화" subtitle="수정 의견 남기면 강사에게 전달됨">
+            <SectionCard title="강사 · AI 코치와 대화" subtitle="메시지마다 AI 코치, 강사, 둘 모두 중 대상을 선택해 보낼 수 있어">
               <StrategyChatPanel workspaceId={workspace?.id} token={token} />
             </SectionCard>
           ) : null}

@@ -134,6 +134,7 @@ def test_strategy_chat_persists_llm_and_instructor_messages(client, auth_headers
 
 def test_community_exam_create_search_submit_and_stats(client, auth_headers):
     headers = auth_headers("student@unitflow.ai")
+    second_headers = auth_headers("student2@unitflow.ai")
 
     created = client.post(
         "/frontend/student/community-exams",
@@ -172,6 +173,27 @@ def test_community_exam_create_search_submit_and_stats(client, auth_headers):
     assert stats["questions"][1]["my_choice"] == "2"
     assert stats["questions"][1]["choice_distribution"]
 
+    second_submitted = client.post(
+        f"/frontend/student/community-exams/{exam_id}/submissions",
+        headers=second_headers,
+        json={
+            "choices": [
+                {"question_number": 1, "selected_choice": "2"},
+                {"question_number": 2, "selected_choice": "3"},
+                {"question_number": 3, "selected_choice": "5"},
+            ]
+        },
+    )
+    assert second_submitted.status_code == 200, second_submitted.text
+
+    stats_after = client.get(f"/frontend/student/community-exams/{exam_id}/stats", headers=headers)
+    assert stats_after.status_code == 200, stats_after.text
+    question_one = stats_after.json()["questions"][0]
+    assert question_one["submission_count"] == 2
+    assert question_one["correct_rate"] == 0.5
+    assert question_one["my_choice"] == "1"
+    assert any(item["choice"] == "2" and item["count"] == 1 for item in question_one["choice_distribution"])
+
 
 def test_planner_regenerate_reflection_and_simulation_are_dynamic(client, auth_headers):
     headers = auth_headers("student@unitflow.ai")
@@ -195,7 +217,9 @@ def test_planner_regenerate_reflection_and_simulation_are_dynamic(client, auth_h
     assert regenerated.status_code == 200, regenerated.text
     summary = regenerated.json()["regeneration_summary"]
     assert summary["preserved_completed"] is True
-    assert "moved_items_count" in summary
+    assert summary["changed"] is True
+    assert summary["moved_items_count"] >= 1
+    assert summary["highlights"]
 
     reflection = client.post(
         f"/frontend/student/planner/{plan['id']}/reflection",
@@ -204,7 +228,8 @@ def test_planner_regenerate_reflection_and_simulation_are_dynamic(client, auth_h
     )
     assert reflection.status_code == 200, reflection.text
     assert reflection.json()["reflection_saved"] is True
-    assert isinstance(reflection.json()["recommended_adjustments"], list)
+    assert reflection.json()["recommended_adjustments"]
+    assert reflection.json()["updated_plan_summary"]
 
     base_sim = client.post(
         "/frontend/student/simulations/goal-scenario",
@@ -218,8 +243,18 @@ def test_planner_regenerate_reflection_and_simulation_are_dynamic(client, auth_h
     )
     assert base_sim.status_code == 200, base_sim.text
     assert changed_sim.status_code == 200, changed_sim.text
-    assert changed_sim.json()["scenario"]["changed_fields"]
+    changed_fields = set(changed_sim.json()["scenario"]["changed_fields"])
+    assert {"goal_gap", "weekly_time_allocation"}.issubset(changed_fields)
     assert base_sim.json()["scenario"] != changed_sim.json()["scenario"]
+
+    direction_sim = client.post(
+        "/frontend/student/simulations/goal-scenario",
+        headers=headers,
+        json={"subject_score_deltas": [{"subject_code": "MATH", "delta": 3}], "weekly_hours_delta": 4, "assume_direction": "jeongsi"},
+    )
+    assert direction_sim.status_code == 200, direction_sim.text
+    direction_fields = set(direction_sim.json()["scenario"]["changed_fields"])
+    assert len({"goal_gap", "risk_band", "subject_priorities", "weekly_time_allocation"} & direction_fields) >= 2
 
 
 def test_student_self_directed_endpoints_enforce_roles(client, auth_headers):

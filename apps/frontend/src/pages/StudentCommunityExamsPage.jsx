@@ -16,6 +16,8 @@ function CreateExamForm({ token, onCreated, onCancel }) {
     description: '',
     subject: '',
     exam_date: '',
+    question_count: 3,
+    answer_key_text: '1,3,5',
   });
   const [saving, setSaving] = useState(false);
   const { message, isError, flash, flashError } = useFlashMessage(5000);
@@ -25,6 +27,11 @@ function CreateExamForm({ token, onCreated, onCancel }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.title.trim()) { flashError('시험 이름을 입력해줘.'); return; }
+    const answerKey = form.answer_key_text
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const questionCount = Math.max(Number(form.question_count) || answerKey.length || 1, answerKey.length || 1);
     setSaving(true);
     try {
       const res = await apiRequest('/frontend/student/community-exams', {
@@ -33,8 +40,11 @@ function CreateExamForm({ token, onCreated, onCancel }) {
         body: {
           title: form.title.trim(),
           description: form.description.trim() || null,
-          subject: form.subject.trim() || null,
+          subject_name: form.subject.trim() || null,
           exam_date: form.exam_date || null,
+          question_count: questionCount,
+          choice_count: 5,
+          answer_key: answerKey,
         },
       });
       flash('시험을 만들었어.');
@@ -75,6 +85,25 @@ function CreateExamForm({ token, onCreated, onCancel }) {
             onChange={(e) => set('exam_date', e.target.value)}
           />
         </label>
+        <label>
+          문항 수
+          <input
+            type="number"
+            min={1}
+            max={80}
+            value={form.question_count}
+            onChange={(e) => set('question_count', Number(e.target.value))}
+          />
+        </label>
+        <label className="form-span-2">
+          정답 키
+          <input
+            type="text"
+            value={form.answer_key_text}
+            onChange={(e) => set('answer_key_text', e.target.value)}
+            placeholder="예: 1,3,5"
+          />
+        </label>
         <label className="form-span-2">
           설명 (선택)
           <textarea
@@ -100,7 +129,7 @@ function ExamCard({ exam }) {
     <Link to={`/student/community-exams/${exam.id}`} className="community-exam-card">
       <div className="community-exam-card-header">
         <strong>{exam.title}</strong>
-        {exam.subject ? <span className="community-exam-chip">{exam.subject}</span> : null}
+        {(exam.subject_name || exam.subject) ? <span className="community-exam-chip">{exam.subject_name || exam.subject}</span> : null}
       </div>
       {exam.description ? (
         <p className="muted small community-exam-desc">{exam.description}</p>

@@ -27,7 +27,7 @@ function ChoiceBar({ pct, isMine, isCorrect }) {
 function SubmissionForm({ exam, token, onSubmitted }) {
   const questions = exam.questions || [];
   const [answers, setAnswers] = useState(() =>
-    Object.fromEntries(questions.map((q) => [q.id, null]))
+    Object.fromEntries(questions.map((q) => [q.question_number, null]))
   );
   const [submitting, setSubmitting] = useState(false);
   const { message, isError, flash, flashError } = useFlashMessage(5000);
@@ -47,8 +47,8 @@ function SubmissionForm({ exam, token, onSubmitted }) {
         method: 'POST',
         token,
         body: {
-          answers: Object.entries(answers).map(([question_id, selected_choice]) => ({
-            question_id: Number(question_id),
+          choices: Object.entries(answers).map(([question_number, selected_choice]) => ({
+            question_number: Number(question_number),
             selected_choice,
           })),
         },
@@ -69,15 +69,15 @@ function SubmissionForm({ exam, token, onSubmitted }) {
   return (
     <form onSubmit={submit} className="submission-form">
       {questions.map((q, qi) => (
-        <div key={q.id} className="submission-question">
+        <div key={q.question_number} className="submission-question">
           <p className="submission-q-title">
             <strong>Q{qi + 1}.</strong> {q.content || q.question_text || '문항'}
           </p>
           <div className="submission-choices">
-            {(q.choices || []).map((choice, ci) => {
+            {(q.choices || ['1', '2', '3', '4', '5']).map((choice, ci) => {
               const val = typeof choice === 'string' ? choice : choice.value ?? ci + 1;
               const label = typeof choice === 'string' ? choice : choice.label || String(val);
-              const isSelected = answers[q.id] === val;
+              const isSelected = answers[q.question_number] === val;
               return (
                 <label
                   key={ci}
@@ -85,10 +85,10 @@ function SubmissionForm({ exam, token, onSubmitted }) {
                 >
                   <input
                     type="radio"
-                    name={`q_${q.id}`}
+                    name={`q_${q.question_number}`}
                     value={val}
                     checked={isSelected}
-                    onChange={() => setAnswer(q.id, val)}
+                    onChange={() => setAnswer(q.question_number, val)}
                     style={{ display: 'none' }}
                   />
                   <span className="choice-num">{ci + 1}</span>
@@ -117,7 +117,7 @@ function StatsView({ stats, mySubmission }) {
 
   const questions = stats.questions || [];
   const myAnswers = Object.fromEntries(
-    (mySubmission?.answers || []).map((a) => [a.question_id, a.selected_choice])
+    questions.map((q) => [q.question_number, q.my_choice]).filter(([, choice]) => choice != null)
   );
 
   return (
@@ -148,15 +148,15 @@ function StatsView({ stats, mySubmission }) {
 
       {/* 문항별 통계 */}
       {questions.map((q, qi) => {
-        const myChoice = myAnswers[q.id] ?? myAnswers[String(q.id)];
-        const choices = q.choice_stats || [];
+        const myChoice = myAnswers[q.question_number] ?? myAnswers[String(q.question_number)];
+        const choices = q.choice_stats || q.choice_distribution || [];
         return (
-          <div key={q.id} className="stats-question-card">
+          <div key={q.question_number} className="stats-question-card">
             <div className="stats-question-header">
               <strong>Q{qi + 1}. {q.content || q.question_text || '문항'}</strong>
-              {q.correct_answer != null ? (
+              {(q.correct_answer ?? q.answer_key) != null ? (
                 <span className="stats-correct-badge">
-                  정답: {q.correct_answer}번
+                  정답: {q.correct_answer ?? q.answer_key}번
                 </span>
               ) : null}
               {q.correct_rate != null ? (
@@ -165,12 +165,13 @@ function StatsView({ stats, mySubmission }) {
             </div>
             <div className="stats-choices">
               {choices.map((c, ci) => {
-                const isMine = myChoice === c.value || myChoice === (ci + 1);
-                const isCorrect = c.is_correct || q.correct_answer === c.value;
+                const value = c.value ?? c.choice ?? String(ci + 1);
+                const isMine = String(myChoice) === String(value);
+                const isCorrect = c.is_correct || String(q.correct_answer ?? q.answer_key) === String(value);
                 return (
                   <div key={ci} className={`stats-choice-row${isMine ? ' my-choice' : ''}${isCorrect ? ' correct' : ''}`}>
                     <span className="choice-num">{ci + 1}</span>
-                    <span className="stats-choice-label">{c.label || String(c.value)}</span>
+                    <span className="stats-choice-label">{c.label || String(value)}</span>
                     <ChoiceBar pct={(c.rate ?? 0) * 100} isMine={isMine} isCorrect={isCorrect} />
                     {isMine ? <span className="stats-mine-marker">내 선택</span> : null}
                     {isCorrect ? <span className="stats-correct-marker">✓</span> : null}
@@ -190,10 +191,23 @@ export default function StudentCommunityExamDetailPage() {
   const { token } = useAuth();
   const [submitted, setSubmitted] = useState(false);
 
-  const { data: exam, loading, error } = useAsyncData(
+  const { data: examPayload, loading, error } = useAsyncData(
     () => apiRequest(`/frontend/student/community-exams/${examId}`, { token }),
     [token, examId]
   );
+
+  const exam = examPayload
+    ? {
+        ...(examPayload.exam || examPayload),
+        questions: (examPayload.questions || examPayload.exam?.questions || []).map((question) => ({
+          ...question,
+          choices: question.choices || Array.from(
+            { length: examPayload.exam?.choice_count || examPayload.choice_count || 5 },
+            (_, index) => String(index + 1)
+          ),
+        })),
+      }
+    : null;
 
   const { data: stats, reload: reloadStats } = useAsyncData(
     () =>
@@ -224,7 +238,7 @@ export default function StudentCommunityExamDetailPage() {
           {/* 시험 정보 */}
           <SectionCard
             title={exam.title}
-            subtitle={[exam.subject, exam.exam_date].filter(Boolean).join(' · ')}
+            subtitle={[exam.subject_name || exam.subject, exam.exam_date].filter(Boolean).join(' · ')}
           >
             <div className="stack-gap">
               {exam.description ? <p style={{ margin: 0 }}>{exam.description}</p> : null}

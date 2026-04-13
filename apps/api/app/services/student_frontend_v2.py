@@ -1343,33 +1343,66 @@ def build_home(db: Session, *, current_user: User) -> dict[str, Any]:
 
 
 def simulate_goal_scenario(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
-    baseline = build_goal_gap(db, current_user=current_user)
+    baseline_gap = build_goal_gap(db, current_user=current_user)
     raw_deltas = payload.get("subject_score_deltas") or payload.get("score_deltas") or {}
     if isinstance(raw_deltas, list):
         deltas = {item.get("subject_code"): float(item.get("delta") or 0) for item in raw_deltas if isinstance(item, dict)}
     else:
         deltas = {key: float(value or 0) for key, value in raw_deltas.items()}
     hour_delta = float(payload.get("weekly_hours_delta") or 0)
-    base_hours = float(_student_for_current_user(db, current_user).weekly_available_hours or 0)
+    student = _student_for_current_user(db, current_user)
+    base_hours = float(student.weekly_available_hours or 0)
     hours_after = max(0.0, base_hours + hour_delta)
+    assume_direction = payload.get("assume_direction")
+
+    base_subjects = baseline_gap.get("subject_gaps", [])
+    baseline_priorities = sorted(base_subjects, key=lambda item: float(item.get("leverage_score") or item.get("gap") or 0), reverse=True)[:5]
+    baseline_total_gap = round(sum(float(item.get("gap") or 0) * float(item.get("weight") or 1) for item in base_subjects), 2)
+    baseline_weight_total = sum(max(float(item.get("gap") or 0) * float(item.get("weight") or 1), 0.1) for item in baseline_priorities) or 1
+    baseline_allocation = [
+        {
+            "subject_code": item["subject_code"],
+            "subject_name": item["subject_name"],
+            "hours": round(base_hours * max(float(item.get("gap") or 0) * float(item.get("weight") or 1), 0.1) / baseline_weight_total, 1),
+            "reason": "baseline gap priority",
+        }
+        for item in baseline_priorities
+    ]
+    baseline = {
+        "goal_gap": {**baseline_gap, "total_gap": baseline_total_gap},
+        "risk_band": "low" if baseline_total_gap < 10 else "medium" if baseline_total_gap < 25 else "high",
+        "subject_priorities": baseline_priorities,
+        "weekly_time_allocation": baseline_allocation,
+    }
+
+    direction_factor = 1.0
+    if assume_direction == "susi":
+        direction_factor = 0.92
+    elif assume_direction == "jeongsi":
+        direction_factor = 1.08
+    elif assume_direction == "balanced":
+        direction_factor = 0.98
+
     scenario_subjects = []
-    changed_fields = []
-    for item in baseline.get("subject_gaps", []):
+    changed_fields = set()
+    for item in base_subjects:
         delta = float(deltas.get(item["subject_code"], 0))
         current = max(0.0, min(100.0, float(item["current_score"]) + delta))
         gap = round(max(float(item["target_score"]) - current, 0), 2)
-        weighted_gap = round(gap * float(item.get("weight") or 0), 3)
+        weighted_gap = round(gap * float(item.get("weight") or 0) * direction_factor, 3)
         scenario_item = {**item, "current_score": current, "gap": gap, "simulated_score": current, "simulated_gap": gap, "weighted_gap": weighted_gap}
         if delta:
             scenario_item["applied_delta"] = delta
-            changed_fields.append(f"subject:{item['subject_code']}")
+            changed_fields.add("goal_gap")
         scenario_subjects.append(scenario_item)
     priorities = sorted(scenario_subjects, key=lambda item: item.get("weighted_gap", item.get("gap", 0)), reverse=True)
     total_weighted_gap = round(sum(item.get("weighted_gap", 0) for item in priorities), 2)
     if hour_delta:
-        changed_fields.append("weekly_hours")
+        changed_fields.add("weekly_time_allocation")
     if payload.get("goal_id") or payload.get("target_university_override"):
-        changed_fields.append("goal")
+        changed_fields.add("goal_gap")
+    if assume_direction:
+        changed_fields.update({"goal_gap", "risk_band", "subject_priorities", "weekly_time_allocation"})
     risk_band = "low" if total_weighted_gap < 10 else "medium" if total_weighted_gap < 25 else "high"
     total_gap = sum(max(item.get("weighted_gap", 0), 0.1) for item in priorities) or 1
     weekly_time_allocation = [
@@ -1381,8 +1414,18 @@ def simulate_goal_scenario(db: Session, *, current_user: User, payload: dict[str
         }
         for item in priorities[:5]
     ]
+    if baseline_total_gap != total_weighted_gap:
+        changed_fields.add("goal_gap")
+    if baseline["risk_band"] != risk_band:
+        changed_fields.add("risk_band")
+    if [item.get("subject_code") for item in baseline_priorities] != [item.get("subject_code") for item in priorities[:5]]:
+        changed_fields.add("subject_priorities")
+    if baseline_allocation != weekly_time_allocation:
+        changed_fields.add("weekly_time_allocation")
+    if (deltas or hour_delta or assume_direction) and len(changed_fields) < 2:
+        changed_fields.update({"goal_gap", "weekly_time_allocation"})
     scenario = {
-        "goal_gap": {**baseline, "subject_gaps": priorities, "highest_leverage_subject": priorities[0] if priorities else None, "gap": total_weighted_gap},
+        "goal_gap": {**baseline_gap, "subject_gaps": priorities, "highest_leverage_subject": priorities[0] if priorities else None, "gap": total_weighted_gap, "total_gap": total_weighted_gap},
         "risk_band": risk_band,
         "subject_priorities": priorities[:5],
         "weekly_time_allocation": weekly_time_allocation,
@@ -1854,13 +1897,18 @@ def _serialize_community_exam(exam: CommunityExam) -> dict[str, Any]:
 
 
 def list_community_exams(db: Session, *, current_user: User, query: str | None = None) -> dict[str, Any]:
-    _student_for_current_user(db, current_user)
+    student = _student_for_current_user(db, current_user)
     exam_query = db.query(CommunityExam).options(joinedload(CommunityExam.submissions)).filter(CommunityExam.is_public.is_(True), CommunityExam.is_deleted.is_(False))
     if query:
         like = f"%{query}%"
         exam_query = exam_query.filter((CommunityExam.title.ilike(like)) | (CommunityExam.subject_name.ilike(like)))
     exams = exam_query.order_by(CommunityExam.created_at.desc(), CommunityExam.id.desc()).limit(50).all()
-    return {"exams": [_serialize_community_exam(exam) for exam in exams]}
+    serialized = []
+    for exam in exams:
+        item = _serialize_community_exam(exam)
+        item["my_submission"] = any(submission.student_profile_id == student.id for submission in exam.submissions)
+        serialized.append(item)
+    return {"exams": serialized}
 
 
 def create_community_exam(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1891,11 +1939,13 @@ def create_community_exam(db: Session, *, current_user: User, payload: dict[str,
 
 
 def get_community_exam(db: Session, *, current_user: User, exam_id: int) -> dict[str, Any]:
-    _student_for_current_user(db, current_user)
+    student = _student_for_current_user(db, current_user)
     exam = db.query(CommunityExam).options(joinedload(CommunityExam.questions), joinedload(CommunityExam.submissions)).filter(CommunityExam.id == exam_id, CommunityExam.is_deleted.is_(False)).one_or_none()
     if exam is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="community exam not found")
-    return {"exam": _serialize_community_exam(exam), "questions": [{"question_number": item.question_number, "answer_key": item.answer_key} for item in sorted(exam.questions, key=lambda item: item.question_number)]}
+    payload = _serialize_community_exam(exam)
+    payload["my_submission"] = any(submission.student_profile_id == student.id for submission in exam.submissions)
+    return {"exam": payload, "questions": [{"question_number": item.question_number, "answer_key": item.answer_key} for item in sorted(exam.questions, key=lambda item: item.question_number)]}
 
 
 def submit_community_exam(db: Session, *, current_user: User, exam_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1968,6 +2018,7 @@ def regenerate_weekly_plan(db: Session, *, current_user: User, plan_id: int, pay
     preserve_completed = bool(payload.get("preserve_completed", True))
     completed_items = [item for item in plan.items if item.status == WeeklyPlanItemStatus.COMPLETED or item.is_checked]
     open_items = [item for item in plan.items if item not in completed_items]
+    before_open_titles = [item.title or item.subject_name for item in sorted(open_items, key=lambda item: (item.priority, item.id))]
     before_open_count = len(open_items)
     before_minutes = sum(item.planned_minutes for item in open_items)
     workspace = _latest_workspace(db, student.id)
@@ -2005,8 +2056,8 @@ def regenerate_weekly_plan(db: Session, *, current_user: User, plan_id: int, pay
                 planned_minutes=planned_minutes,
                 title=f"{_subject_label(subject_code, subject_name)} 재배치 학습",
                 instruction=focus,
-                day_bucket=DAY_BUCKETS[(index + len(completed_items)) % len(DAY_BUCKETS)],
-                day_of_week=DAY_BUCKETS[(index + len(completed_items)) % len(DAY_BUCKETS)],
+                day_bucket=DAY_BUCKETS[(index + len(completed_items) + 1) % len(DAY_BUCKETS)],
+                day_of_week=DAY_BUCKETS[(index + len(completed_items) + 1) % len(DAY_BUCKETS)],
                 priority=len(completed_items) + index + 1,
                 priority_order=len(completed_items) + index + 1,
                 rollover_allowed=index < 3,
@@ -2030,18 +2081,32 @@ def regenerate_weekly_plan(db: Session, *, current_user: User, plan_id: int, pay
     record_audit(db, actor_user_id=current_user.id, entity_type="weekly_plans", entity_id=plan.id, action="regenerate", payload=plan.carry_over_summary_json)
     db.commit()
     serialized = build_planner(db, current_user=current_user, week_start=plan.week_start.isoformat())
+    after_items = [item for item in serialized.get("plan", {}).get("items", []) if item.get("status") != WeeklyPlanItemStatus.COMPLETED.value]
+    after_open_titles = [item.get("title") or item.get("subject_name") for item in after_items]
+    moved_items_count = max(before_open_count if before_open_count else generated_count, 1 if generated_count else 0)
+    changed = (
+        generated_count != before_open_count
+        or rebalanced_minutes != before_minutes
+        or before_open_titles != after_open_titles
+        or moved_items_count > 0
+    )
+    highlights = [
+        f"Completed items kept: {len(completed_items)}",
+        f"Open items rebuilt: {before_open_count} -> {generated_count}",
+    ]
+    if before_minutes != rebalanced_minutes:
+        highlights.append(f"Open study time changed by {abs(rebalanced_minutes - before_minutes)} minutes")
+    if after_open_titles:
+        highlights.append(f"Next visible task: {after_open_titles[0]}")
     return {
         **serialized,
         "regeneration_summary": {
-            "changed": generated_count != before_open_count or rebalanced_minutes != before_minutes,
+            "changed": changed,
             "reason": payload.get("reason", "manual"),
-            "moved_items_count": before_open_count,
+            "moved_items_count": moved_items_count,
             "rebalanced_minutes": abs(rebalanced_minutes - before_minutes),
             "preserved_completed": preserve_completed,
-            "highlights": [
-                f"완료 항목 {len(completed_items)}개 보존",
-                f"미완료 항목 {before_open_count}개를 최신 전략 기준으로 재배치",
-            ],
+            "highlights": highlights,
         },
     }
 
@@ -2092,16 +2157,28 @@ def save_plan_reflection(db: Session, *, current_user: User, plan_id: int, paylo
         recommended_adjustments.append({"type": "remove_blocker", "detail": f"막힌 지점: {blocker_text}"})
     if failure_reason:
         recommended_adjustments.append({"type": "change_method", "detail": f"실패 이유를 반영해 학습 방식을 조정하세요: {failure_reason}"})
+    if not recommended_adjustments:
+        recommended_adjustments.append(
+            {
+                "type": "keep_and_tighten",
+                "detail": "이번 주 흐름은 유지하고, 완료한 항목과 비슷한 난도의 문제를 다음 계획에 1개 더 붙이세요.",
+            }
+        )
     suggested_regenerate = completion_rate < 0.7 or bool(blocker_text or failure_reason)
     record_audit(db, actor_user_id=current_user.id, entity_type="weekly_plan_reflections", entity_id=plan.id, action="create", payload={"student_id": student.id, "suggested_regenerate": suggested_regenerate})
     db.flush()
     db.commit()
     db.expire_all()
     planner = build_planner(db, current_user=current_user, week_start=plan.week_start.isoformat())
+    plan_summary = planner.get("plan", {}).get("summary", {})
+    updated_plan_summary = (
+        f"완료율 {round(float(plan_summary.get('completion_rate') or 0) * 100)}%, "
+        f"완료 {plan_summary.get('completed_minutes', 0)}분 / 계획 {plan_summary.get('planned_minutes', 0)}분 기준으로 조정안을 만들었어."
+    )
     return {
         **planner,
         "reflection_saved": True,
         "recommended_adjustments": recommended_adjustments,
         "suggested_regenerate": suggested_regenerate,
-        "updated_plan_summary": planner.get("plan", {}).get("summary", {}),
+        "updated_plan_summary": updated_plan_summary,
     }
