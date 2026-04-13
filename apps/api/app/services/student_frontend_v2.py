@@ -23,6 +23,7 @@ from ..models import (
     User,
     WeeklyPlan,
     WeeklyPlanItem,
+    WeeklyPlanItemStatus,
     WeeklyPlanReflection,
     WeeklyPlanStatus,
 )
@@ -712,6 +713,8 @@ def generate_weekly_plan(db: Session, *, current_user: User, week_start: str | N
             source_strategy_id=strategy.id if strategy else None,
             workspace_id=workspace_id,
             week_start=start,
+            week_end=start + timedelta(days=6),
+            generation_source="student_workspace" if workspace_id else "approved_strategy",
             status=WeeklyPlanStatus.ACTIVE,
         )
         db.add(plan)
@@ -728,6 +731,7 @@ def generate_weekly_plan(db: Session, *, current_user: User, week_start: str | N
     if not allocations:
         allocations = [{"subject_name": "핵심 과목", "hours": max(student.weekly_available_hours, 6), "focus": "기본 학습"}]
 
+    planned_total = 0
     for index, allocation in enumerate(allocations):
         if isinstance(allocation, str):
             subject_name = allocation
@@ -738,6 +742,8 @@ def generate_weekly_plan(db: Session, *, current_user: User, week_start: str | N
             subject_code = allocation.get("subject_code") or "CUSTOM"
             hours = float(allocation.get("hours") or 1.0)
         unit = units[index % len(units)] if units else {}
+        planned_minutes = max(int(hours * 60), 20)
+        planned_total += planned_minutes
         db.add(
             WeeklyPlanItem(
                 plan_id=plan.id,
@@ -745,12 +751,19 @@ def generate_weekly_plan(db: Session, *, current_user: User, week_start: str | N
                 subject_name=_subject_label(subject_code, subject_name),
                 unit_id=unit.get("unit_id") if isinstance(unit, dict) else None,
                 unit_name=unit.get("unit_name") if isinstance(unit, dict) else None,
-                planned_minutes=max(int(hours * 60), 20),
+                planned_minutes=planned_minutes,
+                title=f"{_subject_label(subject_code, subject_name)} 학습",
+                instruction=allocation.get("focus") if isinstance(allocation, dict) else None,
                 day_bucket=DAY_BUCKETS[index % len(DAY_BUCKETS)],
+                day_of_week=DAY_BUCKETS[index % len(DAY_BUCKETS)],
                 priority=index + 1,
+                priority_order=index + 1,
                 rollover_allowed=index < 3,
             )
         )
+    plan.planned_total_minutes = planned_total
+    plan.completed_total_minutes = 0
+    plan.completion_rate_cached = round(plan.completed_total_minutes / max(plan.planned_total_minutes, 1), 3)
     record_audit(
         db,
         actor_user_id=current_user.id,
@@ -843,8 +856,17 @@ def check_plan_item(db: Session, *, current_user: User, item_id: int, payload: d
         if completed < 0 or completed > 24 * 60:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="완료 시간은 0분 이상 하루 이하로 입력해줘.")
         item.completed_minutes = completed
+    if item.is_checked:
+        item.status = WeeklyPlanItemStatus.COMPLETED
+    elif payload.get("status") == WeeklyPlanItemStatus.SKIPPED.value:
+        item.status = WeeklyPlanItemStatus.SKIPPED
+    else:
+        item.status = WeeklyPlanItemStatus.PLANNED
     if payload.get("student_note") is not None:
         item.student_note = str(payload["student_note"])
+    item.plan.completed_total_minutes = sum(plan_item.completed_minutes for plan_item in item.plan.items)
+    item.plan.planned_total_minutes = sum(plan_item.planned_minutes for plan_item in item.plan.items)
+    item.plan.completion_rate_cached = round(item.plan.completed_total_minutes / max(item.plan.planned_total_minutes, 1), 3)
     record_audit(
         db,
         actor_user_id=current_user.id,
@@ -878,9 +900,14 @@ def save_plan_reflection(db: Session, *, current_user: User, plan_id: int, paylo
     db.add(
         WeeklyPlanReflection(
             plan_id=plan.id,
+            student_profile_id=student.id,
+            reflection_type=payload.get("reflection_type", "weekly"),
+            wins_text=payload.get("wins_text") or payload.get("good"),
+            blocker_text=payload.get("blocker_text") or payload.get("blocked"),
             good=payload.get("good"),
             blocked=payload.get("blocked"),
             failure_reason=payload.get("failure_reason"),
+            adjustment_note=payload.get("adjustment_note") or payload.get("next_adjustment"),
             next_adjustment=payload.get("next_adjustment"),
         )
     )
