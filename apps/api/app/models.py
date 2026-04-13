@@ -80,7 +80,27 @@ class RecalculationTrigger(str, Enum):
     RESULT_CHANGED = "result_changed"
     POLICY_CHANGED = "policy_changed"
     QUESTION_TAG_CHANGED = "question_tag_changed"
+    GOAL_CHANGED = "goal_changed"
+    HABIT_CHANGED = "habit_changed"
+    WORKSPACE_SUBMITTED = "workspace_submitted"
+    PLAN_PROGRESS_CHANGED = "plan_progress_changed"
     MANUAL = "manual"
+
+
+class StrategyWorkspaceStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED_FOR_REVIEW = "submitted_for_review"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    REVISE_REQUESTED = "revise_requested"
+    RESET = "reset"
+
+
+class WeeklyPlanStatus(str, Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
 
 
 class Academy(Base):
@@ -183,6 +203,8 @@ class StudentProfile(Base):
     results: Mapped[list["StudentResult"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     diagnoses: Mapped[list["StudentDiagnosis"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     strategies: Mapped[list["StudentStrategy"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
+    strategy_workspaces: Mapped[list["StudentStrategyWorkspace"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
+    weekly_plans: Mapped[list["WeeklyPlan"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     mastery_current_records: Mapped[list["UnitMasteryCurrent"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     mastery_history_records: Mapped[list["UnitMasteryHistory"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
 
@@ -448,6 +470,86 @@ class StrategyReview(Base):
 
     strategy: Mapped[StudentStrategy] = relationship(back_populates="reviews")
     reviewer: Mapped[User] = relationship()
+
+
+class StudentStrategyWorkspace(Base):
+    __tablename__ = "student_strategy_workspaces"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    base_strategy_id: Mapped[int | None] = mapped_column(ForeignKey("student_strategies.id"))
+    status: Mapped[StrategyWorkspaceStatus] = mapped_column(
+        SqlEnum(StrategyWorkspaceStatus),
+        default=StrategyWorkspaceStatus.DRAFT,
+        index=True,
+    )
+    overrides: Mapped[dict] = mapped_column(JSONType, default=dict)
+    student_note: Mapped[str | None] = mapped_column(Text)
+    instructor_message: Mapped[str | None] = mapped_column(Text)
+    instructor_private_note: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="strategy_workspaces")
+    base_strategy: Mapped[StudentStrategy | None] = relationship()
+
+
+class WeeklyPlan(Base):
+    __tablename__ = "weekly_plans"
+    __table_args__ = (UniqueConstraint("student_profile_id", "week_start", name="uq_student_weekly_plan"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    source_strategy_id: Mapped[int | None] = mapped_column(ForeignKey("student_strategies.id"))
+    workspace_id: Mapped[int | None] = mapped_column(ForeignKey("student_strategy_workspaces.id"))
+    week_start: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[WeeklyPlanStatus] = mapped_column(SqlEnum(WeeklyPlanStatus), default=WeeklyPlanStatus.ACTIVE)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="weekly_plans")
+    source_strategy: Mapped[StudentStrategy | None] = relationship()
+    workspace: Mapped[StudentStrategyWorkspace | None] = relationship()
+    items: Mapped[list["WeeklyPlanItem"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    reflections: Mapped[list["WeeklyPlanReflection"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+
+
+class WeeklyPlanItem(Base):
+    __tablename__ = "weekly_plan_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("weekly_plans.id"), index=True)
+    subject_code: Mapped[str] = mapped_column(String(20))
+    subject_name: Mapped[str] = mapped_column(String(60))
+    unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id"))
+    unit_name: Mapped[str | None] = mapped_column(String(120))
+    planned_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    completed_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    day_bucket: Mapped[str] = mapped_column(String(20), default="weekday")
+    priority: Mapped[int] = mapped_column(Integer, default=1)
+    rollover_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    student_note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    plan: Mapped[WeeklyPlan] = relationship(back_populates="items")
+    unit: Mapped[Unit | None] = relationship()
+
+
+class WeeklyPlanReflection(Base):
+    __tablename__ = "weekly_plan_reflections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("weekly_plans.id"), index=True)
+    good: Mapped[str | None] = mapped_column(Text)
+    blocked: Mapped[str | None] = mapped_column(Text)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    next_adjustment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+    plan: Mapped[WeeklyPlan] = relationship(back_populates="reflections")
 
 
 class AuditLog(Base):
