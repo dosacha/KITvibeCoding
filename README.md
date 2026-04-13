@@ -1,109 +1,120 @@
-# UnitFlow AI MVP
+﻿# UnitFlow AI
 
-학생 진단, 목표 대학 기준 점수 격차 계산, 맞춤 학습 전략 제안을 위한 교육 AI 서비스다.
+한국 중고등학생, 학원 강사, 학원 운영자를 위한 설명 가능한 학습 진단 및 목표 대학 맞춤 전략 MVP다.
 
 ## 공식 실행 경로
 
 - 백엔드: `apps/api`
 - 프런트엔드: `apps/frontend`
 
-현재 공식 프런트엔드는 `apps/frontend` 하나다.
+클론 직후에는 백엔드 가상환경과 프런트 의존성이 없으므로 아래 순서대로 한 번 설치해야 한다.
 
-## 저장소 구조
+## 사전 준비
 
-```text
-apps/
-  api/        FastAPI 기반 백엔드
-  frontend/   Vite + React 기반 프런트엔드
-scripts/
-  demo_smoke_check.ps1
-```
+- Python 3.13 권장
+- Node.js 20 이상 권장
+- Windows PowerShell 기준 명령 제공
 
-## 핵심 기능
-
-- 역할 기반 로그인
-- 학생별 취약 유형 진단
-- 목표 대학 기준 점수 격차 계산
-- 학생 맞춤 학습 전략 제안
-- 강사용 학생 요약 대시보드
-- 시험 등록, 수정, 문항 등록
-- 학생 결과 입력과 전략 재계산
-- 대학 정책 조회, 등록, 수정
-
-## 환경 변수
-
-루트의 `.env.example` 기준.
-
-```env
-APP_ENV=development
-DATABASE_URL=sqlite:///./unitflow.db
-AUTO_CREATE_SCHEMA=false
-
-# 운영 권장 예시
-# DATABASE_URL=postgresql+psycopg://unitflow:unitflow@localhost:5432/unitflow
-
-JWT_SECRET=change-me
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=720
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.4-mini
-CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
-UNITFLOW_API_BASE_URL=http://localhost:8000
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-## 데이터베이스 운영 원칙
-
-- 로컬 빠른 실행 기본값은 SQLite
-- 운영 권장 데이터베이스는 PostgreSQL
-- 서버 기동 시 자동 스키마 생성은 기본 비활성화
-- 스키마 생성과 초기 데이터 적재는 명시적 명령으로 처리
-
-## 백엔드 실행
+Python 버전 확인:
 
 ```powershell
-cd apps/api
+py -0p
+```
+
+`Python 3.14`로 백엔드 가상환경을 만들면 일부 패키지와 테스트에서 문제가 날 수 있다. 가능하면 `py -3.13`을 사용한다.
+
+## 1. 백엔드 처음 실행
+
+```powershell
+cd C:\Users\dosac\projects\KITvibeCoding\apps\api
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-copy ..\..\.env.example .env
-pip uninstall -y bcrypt
-pip install bcrypt==4.0.1
+copy .env.example .env
 python manage_db.py seed
 python -m uvicorn app.main:app --reload
 ```
 
-스키마만 만들고 싶을 때:
+백엔드 주소:
 
-```powershell
-cd apps/api
-python manage_db.py init
+```text
+http://127.0.0.1:8000
 ```
 
-스키마만 초기화하고 싶을 때:
+정상 확인:
 
 ```powershell
-cd apps/api
-python manage_db.py reset
+curl http://127.0.0.1:8000/health
 ```
 
-## 프런트엔드 실행
+정상 응답:
+
+```json
+{"status":"ok"}
+```
+
+## 2. 프런트엔드 처음 실행
+
+새 PowerShell 창에서 실행한다.
 
 ```powershell
-cd apps/frontend
-npm install
-npm run dev
+cd C:\Users\dosac\projects\KITvibeCoding\apps\frontend
+npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
+npm.cmd run dev
 ```
 
-브라우저 주소:
+프런트 주소:
 
-- `http://127.0.0.1:5173`
+```text
+http://127.0.0.1:5173
+```
+
+## 3. 다음 실행부터
+
+백엔드 의존성 설치와 프런트 의존성 설치는 처음 한 번만 필요하다.
+
+백엔드:
+
+```powershell
+cd C:\Users\dosac\projects\KITvibeCoding\apps\api
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --reload
+```
+
+프런트:
+
+```powershell
+cd C:\Users\dosac\projects\KITvibeCoding\apps\frontend
+npm.cmd run dev
+```
+
+DB를 초기화하고 예시 데이터를 다시 넣고 싶을 때만 실행한다.
+
+```powershell
+cd C:\Users\dosac\projects\KITvibeCoding\apps\api
+.\.venv\Scripts\Activate.ps1
+python manage_db.py seed
+```
 
 ## 테스트 계정
 
 - 관리자: `admin@unitflow.ai` / `password123`
 - 강사: `instructor@unitflow.ai` / `password123`
 - 학생: `student@unitflow.ai` / `password123`
+
+## 주요 기능
+
+- 역할 기반 로그인
+- 강사용 대시보드
+- 학생별 취약 유형 진단
+- 단원별 이해도와 문항 통계
+- 시험, 문항, 결과 입력
+- CSV 업로드
+- 목표 대학 정책 관리
+- 학생별 전략 비교와 강사 승인
+- 학생에게 승인된 전략만 노출
+- 감사 로그, 변경 이력, 재계산 작업 조회
 
 ## 주요 API
 
@@ -112,69 +123,122 @@ npm run dev
 - `POST /auth/login`
 - `GET /auth/me`
 
-프런트 화면용 데이터:
+프런트 화면 데이터:
 
 - `GET /frontend/dashboard/instructor`
 - `GET /frontend/dashboard/student`
-- `GET /frontend/students`
 - `GET /frontend/students/{student_id}`
+- `GET /frontend/students/{student_id}/strategy-options`
 - `GET /frontend/exams`
-- `GET /frontend/metadata`
+- `GET /frontend/exams/{exam_id}`
+- `GET /frontend/exams/{exam_id}/result-entry`
+- `GET /frontend/universities/policies`
 
-운영 CRUD:
+운영 입력:
 
-- `GET /exams`
 - `POST /exams`
 - `PUT /exams/{exam_id}`
-- `GET /exams/{exam_id}/questions`
 - `POST /questions`
 - `PUT /questions/{question_id}`
-- `GET /students/{student_profile_id}/results`
 - `POST /student-results`
-- `POST /students/{student_profile_id}/recalculate`
-- `GET /universities/policies`
+- `POST /student-results/upload-csv`
+- `POST /students/{student_id}/recalculate`
+- `POST /strategies/{strategy_id}/reviews`
 - `POST /universities/policies`
 - `PUT /universities/policies/{policy_id}`
 
+운영 로그:
+
+- `GET /audit-logs`
+- `GET /change-history`
+- `GET /recalculation-jobs`
+
 ## 검증 명령
 
-백엔드 검증:
+백엔드:
 
 ```powershell
 cd apps/api
-python -m compileall app tests
-.\.venv\Scripts\python.exe -m pytest tests\test_domain_services.py tests\test_engines.py tests\test_frontend_adapter.py tests\test_frontend_schemas.py tests\test_university_policy_services.py
+.\.venv\Scripts\Activate.ps1
+python -m pytest tests
 ```
 
-프런트엔드 빌드 검증:
+현재 통과 기준:
+
+```text
+27 passed
+```
+
+프런트:
 
 ```powershell
 cd apps/frontend
-npm run build
+npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
+npm.cmd run build
+npm.cmd run test
 ```
 
-빠른 점검:
+현재 통과 기준:
+
+```text
+프런트 빌드 통과
+17 tests passed
+```
+
+## 환경 변수
+
+백엔드는 `apps/api/.env.example`을 `apps/api/.env`로 복사해서 사용한다.
+
+프런트는 `apps/frontend/.env.example`을 기준으로 `VITE_API_BASE_URL`을 설정한다.
+
+기본 로컬 값:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+## 문제 해결
+
+### `Activate.ps1`을 찾을 수 없음
+
+백엔드 가상환경이 아직 없는 상태다.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\demo_smoke_check.ps1
+cd apps/api
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
-## 데모 흐름
+### `No module named sqlalchemy` 또는 `No module named uvicorn`
 
-강사 흐름:
+가상환경을 활성화하지 않았거나 의존성을 설치하지 않은 상태다.
 
-1. 강사 계정 로그인
-2. 강사용 요약 확인
-3. 학생 목록 진입
-4. 학생 상세 진입
-5. 학생 결과 입력
-6. 전략 다시 계산 확인
-7. 시험 관리에서 시험과 문항 등록
-8. 목표 대학 정책 화면에서 정책 등록 또는 수정
+```powershell
+cd apps/api
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-학생 흐름:
+### `vite`를 찾을 수 없음
 
-1. 학생 계정 로그인
-2. 나의 학습 전략 확인
-3. 진단 근거 확인
-4. 우선 보완 과목과 단원 확인
+프런트 의존성이 설치되지 않은 상태다.
+
+```powershell
+cd apps/frontend
+npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
+```
+
+### npm 설치가 내부 레지스트리에서 멈춤
+
+현재 `package-lock.json`은 공개 npm registry 기준으로 정리되어 있다. 그래도 문제가 나면 아래 명령으로 실행한다.
+
+```powershell
+npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
+```
+
+## 운영 메모
+
+- 로컬 개발 기본 DB는 SQLite다.
+- 운영 환경에서는 PostgreSQL 사용을 권장한다.
+- `APP_ENV=production`에서는 SQLite 사용을 피한다.
+- LLM 호출은 선택 사항이며, API 키가 없어도 deterministic fallback 전략이 동작한다.
