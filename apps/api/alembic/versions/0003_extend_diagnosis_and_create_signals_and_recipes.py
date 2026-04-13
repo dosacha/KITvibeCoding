@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "0003_extend_diagnosis_and_create_signals_and_recipes"
-down_revision = "0002_create_direction_and_goal_readiness_snapshots"
+down_revision = "0002_direction_goal_snapshots"
 branch_labels = None
 depends_on = None
 
