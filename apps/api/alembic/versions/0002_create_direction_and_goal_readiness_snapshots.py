@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0002_create_direction_and_goal_readiness_snapshots"
+revision = "0002_direction_goal_snapshot"
 down_revision = "0001_expand_profiles_and_habits"
 branch_labels = None
 depends_on = None
