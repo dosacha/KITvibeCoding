@@ -23,6 +23,56 @@ py -0p
 
 `Python 3.14`로 백엔드 가상환경을 만들면 일부 패키지와 테스트에서 문제가 날 수 있다. 가능하면 `py -3.13`을 사용한다.
 
+## 다른 로컬에서 처음 실행
+
+새 PC나 다른 폴더에서 처음 실행할 때는 clone부터 시작한다. 아래 예시는 Windows PowerShell 기준이다.
+
+```powershell
+cd C:\Users\dosac\projects
+git clone https://github.com/dosacha/KITvibeCoding.git
+cd KITvibeCoding
+```
+
+백엔드 준비:
+
+```powershell
+cd apps\api
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+copy .env.example .env
+python manage_db.py upgrade
+python manage_db.py seed
+python -m uvicorn app.main:app --reload
+```
+
+다른 PowerShell 창에서 프런트 준비:
+
+```powershell
+cd C:\Users\dosac\projects\KITvibeCoding\apps\frontend
+npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
+npm.cmd run dev
+```
+
+접속 주소:
+
+```text
+프런트: http://localhost:5173
+백엔드: http://127.0.0.1:8000
+API 문서: http://127.0.0.1:8000/docs
+```
+
+처음 실행 후 로그인은 아래 데모 계정을 사용한다.
+
+```text
+admin@unitflow.ai / password123
+instructor@unitflow.ai / password123
+student@unitflow.ai / password123
+```
+
+주의: 기존 DB가 없는 새 로컬에서는 `python manage_db.py upgrade`로 Alembic 마이그레이션을 먼저 적용한 뒤 `python manage_db.py seed`를 실행한다. 이미 로컬 DB가 있고 데이터를 유지해야 한다면 `reset`이나 DB 파일 삭제를 하지 않는다.
+
 ## 1. 백엔드 처음 실행
 
 ```powershell
