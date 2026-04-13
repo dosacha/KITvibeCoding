@@ -5,8 +5,7 @@ services:
     rootDir: apps/api
     plan: free
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python manage_db.py upgrade
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: python manage_db.py upgrade && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
