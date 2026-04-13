@@ -60,9 +60,30 @@ def reset_schema() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def alembic_upgrade(revision: str = "head") -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    base_dir = Path(__file__).resolve().parent
+    config = Config(str(base_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(base_dir / "alembic"))
+    command.upgrade(config, revision)
+
+
+def alembic_stamp(revision: str = "head") -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    base_dir = Path(__file__).resolve().parent
+    config = Config(str(base_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(base_dir / "alembic"))
+    command.stamp(config, revision)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="UnitFlow AI DB manager")
-    parser.add_argument("command", choices=["init", "reset", "seed", "migrate"])
+    parser.add_argument("command", choices=["init", "reset", "seed", "migrate", "upgrade", "stamp"])
+    parser.add_argument("--revision", default="head")
     args = parser.parse_args()
 
     if args.command == "init":
@@ -76,6 +97,14 @@ def main() -> None:
     if args.command == "migrate":
         run_compatibility_migrations()
         print("compatibility migration completed")
+        return
+    if args.command == "upgrade":
+        alembic_upgrade(args.revision)
+        print(f"alembic upgraded to {args.revision}")
+        return
+    if args.command == "stamp":
+        alembic_stamp(args.revision)
+        print(f"alembic stamped at {args.revision}")
         return
     if args.command == "seed":
         run_compatibility_migrations()
