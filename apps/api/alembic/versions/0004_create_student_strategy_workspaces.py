@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "0004_strategy_workspace"
-down_revision = "0003_extend_diagnosis_and_create_signals_and_recipes"
+down_revision = "0003_extend_diag"
 branch_labels = None
 depends_on = None
 
