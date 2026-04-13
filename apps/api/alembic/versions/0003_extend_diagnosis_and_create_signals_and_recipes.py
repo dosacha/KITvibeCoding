@@ -4,19 +4,20 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0003_diagnosis_recipe"
-down_revision = "0002_goal_snapshots"
+revision = "0003_extend_diagnosis_and_create_signals_and_recipes"
+down_revision = "0002_create_direction_and_goal_readiness_snapshots"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("student_diagnoses", sa.Column("admission_direction_snapshot_id", sa.Integer(), sa.ForeignKey("admission_direction_snapshots.id"), nullable=True))
-    op.add_column("student_diagnoses", sa.Column("goal_readiness_snapshot_id", sa.Integer(), sa.ForeignKey("goal_readiness_snapshots.id"), nullable=True))
-    op.add_column("student_diagnoses", sa.Column("confidence_level", sa.String(length=20), nullable=True))
-    op.add_column("student_diagnoses", sa.Column("coaching_summary", sa.Text(), nullable=True))
-    op.add_column("student_diagnoses", sa.Column("low_confidence_reason_json", sa.JSON(), nullable=True))
-    op.create_index("ix_student_diagnosis_student_computed", "student_diagnoses", ["student_profile_id", "computed_at"])
+    with op.batch_alter_table("student_diagnoses") as batch_op:
+        batch_op.add_column(sa.Column("admission_direction_snapshot_id", sa.Integer(), sa.ForeignKey("admission_direction_snapshots.id", name="fk_student_diagnoses_admission_direction_snapshot_id"), nullable=True))
+        batch_op.add_column(sa.Column("goal_readiness_snapshot_id", sa.Integer(), sa.ForeignKey("goal_readiness_snapshots.id", name="fk_student_diagnoses_goal_readiness_snapshot_id"), nullable=True))
+        batch_op.add_column(sa.Column("confidence_level", sa.String(length=20), nullable=True))
+        batch_op.add_column(sa.Column("coaching_summary", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("low_confidence_reason_json", sa.JSON(), nullable=True))
+        batch_op.create_index("ix_student_diagnosis_student_computed", ["student_profile_id", "computed_at"])
 
     op.create_table(
         "diagnosis_signals",
@@ -57,9 +58,10 @@ def downgrade() -> None:
     op.drop_table("study_recipe_templates")
     op.drop_index("ix_diagnosis_signal_diagnosis", table_name="diagnosis_signals")
     op.drop_table("diagnosis_signals")
-    op.drop_index("ix_student_diagnosis_student_computed", table_name="student_diagnoses")
-    op.drop_column("student_diagnoses", "low_confidence_reason_json")
-    op.drop_column("student_diagnoses", "coaching_summary")
-    op.drop_column("student_diagnoses", "confidence_level")
-    op.drop_column("student_diagnoses", "goal_readiness_snapshot_id")
-    op.drop_column("student_diagnoses", "admission_direction_snapshot_id")
+    with op.batch_alter_table("student_diagnoses") as batch_op:
+        batch_op.drop_index("ix_student_diagnosis_student_computed")
+        batch_op.drop_column("low_confidence_reason_json")
+        batch_op.drop_column("coaching_summary")
+        batch_op.drop_column("confidence_level")
+        batch_op.drop_column("goal_readiness_snapshot_id")
+        batch_op.drop_column("admission_direction_snapshot_id")

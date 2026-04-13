@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "0004_strategy_workspace"
-down_revision = "0003_diagnosis_recipe"
+down_revision = "0003_extend_diagnosis_and_create_signals_and_recipes"
 branch_labels = None
 depends_on = None
 
@@ -42,20 +42,22 @@ def upgrade() -> None:
     )
     op.create_index("ix_strategy_workspace_student_current", "student_strategy_workspaces", ["student_profile_id", "is_current", "updated_at"])
 
-    op.add_column("strategy_reviews", sa.Column("workspace_id", sa.Integer(), sa.ForeignKey("student_strategy_workspaces.id"), nullable=True))
-    op.add_column("strategy_reviews", sa.Column("review_scope", sa.String(length=40), nullable=True))
-    op.add_column("strategy_reviews", sa.Column("student_visible_message", sa.Text(), nullable=True))
-    op.add_column("strategy_reviews", sa.Column("instructor_private_note", sa.Text(), nullable=True))
-    op.add_column("strategy_reviews", sa.Column("diff_summary_json", sa.JSON(), nullable=True))
-    op.add_column("strategy_reviews", sa.Column("visible_to_student", sa.Boolean(), nullable=True))
+    with op.batch_alter_table("strategy_reviews") as batch_op:
+        batch_op.add_column(sa.Column("workspace_id", sa.Integer(), sa.ForeignKey("student_strategy_workspaces.id", name="fk_strategy_reviews_workspace_id"), nullable=True))
+        batch_op.add_column(sa.Column("review_scope", sa.String(length=40), nullable=True))
+        batch_op.add_column(sa.Column("student_visible_message", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("instructor_private_note", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("diff_summary_json", sa.JSON(), nullable=True))
+        batch_op.add_column(sa.Column("visible_to_student", sa.Boolean(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("strategy_reviews", "visible_to_student")
-    op.drop_column("strategy_reviews", "diff_summary_json")
-    op.drop_column("strategy_reviews", "instructor_private_note")
-    op.drop_column("strategy_reviews", "student_visible_message")
-    op.drop_column("strategy_reviews", "review_scope")
-    op.drop_column("strategy_reviews", "workspace_id")
+    with op.batch_alter_table("strategy_reviews") as batch_op:
+        batch_op.drop_column("visible_to_student")
+        batch_op.drop_column("diff_summary_json")
+        batch_op.drop_column("instructor_private_note")
+        batch_op.drop_column("student_visible_message")
+        batch_op.drop_column("review_scope")
+        batch_op.drop_column("workspace_id")
     op.drop_index("ix_strategy_workspace_student_current", table_name="student_strategy_workspaces")
     op.drop_table("student_strategy_workspaces")
