@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0009_student_self_directed_surfaces"
+revision = "0009_student_surface"
 down_revision = "0008_harden_after_backfill"
 branch_labels = None
 depends_on = None
