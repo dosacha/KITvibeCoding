@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5174,http://localhost:5174,"
         "http://127.0.0.1:5175,http://localhost:5175"
     )
+    cors_origin_regex: str | None = r"http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):517\d"
     unitflow_api_base_url: str = "http://localhost:8000"
     vite_api_base_url: str = "http://localhost:8000"
 
