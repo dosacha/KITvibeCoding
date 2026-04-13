@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge.jsx';
 import StrategyCompareCard from '../components/StrategyCompareCard.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAsyncData } from '../hooks/useAsyncData.js';
+import { useFlashMessage } from '../hooks/useFlashMessage.js';
 import { apiRequest } from '../lib/api.js';
 
 // 학생 상세 + 전략 비교 페이지.
@@ -76,22 +77,13 @@ export default function StudentDetailPage() {
   const [profileDraft, setProfileDraft] = useState(null);
   const [goalDrafts, setGoalDrafts] = useState([]);
   const [habitDraft, setHabitDraft] = useState(emptyHabitDraft);
-  const [pageMessage, setPageMessage] = useState('');
-  const [pageError, setPageError] = useState('');
+  const { message: pageMessage, isError: pageIsError, flash: showFlash, flashError: showError } = useFlashMessage(5000);
 
   // 전략 비교 / 검토 상태
   const [selectedVariantId, setSelectedVariantId] = useState(null);
   const [reviewDraft, setReviewDraft] = useState(null);
   const [reviewSaving, setReviewSaving] = useState(false);
 
-  const showFlash = (msg) => {
-    setPageMessage(msg);
-    setPageError('');
-  };
-  const showError = (msg) => {
-    setPageError(msg);
-    setPageMessage('');
-  };
 
   const { data, loading, error, reload } = useAsyncData(
     async () => {
@@ -338,8 +330,7 @@ export default function StudentDetailPage() {
       </div>
       {loading ? <div className="empty-state">학생 데이터를 불러오는 중입니다...</div> : null}
       {error ? <div className="error-box">{error}</div> : null}
-      {pageMessage ? <div className="info-box">{pageMessage}</div> : null}
-      {pageError ? <div className="error-box">{pageError}</div> : null}
+      {pageMessage ? <div className={pageIsError ? 'error-box' : 'info-box'}>{pageMessage}</div> : null}
 
       {data && detail ? (
         <>

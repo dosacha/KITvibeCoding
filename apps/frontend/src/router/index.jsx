@@ -112,4 +112,6 @@ export const appRouter = createBrowserRouter([
       </StudentRoute>
     ),
   },
+  // 존재하지 않는 경로 → 로그인 페이지로
+  { path: '*', element: <Navigate to="/" replace /> },
 ]);

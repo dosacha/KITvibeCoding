@@ -1,7 +1,27 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
 STRATEGY_SYSTEM_PROMPT = """
-너는 UnitFlow AI 전략 설명 생성기다.
-반드시 입력된 구조화 데이터만 사용해 설명을 작성한다.
-과장하거나 합격 가능성을 보장하지 않는다.
-학생용 문장은 코칭형 표현을 사용한다.
-강사용 문장은 근거 지표와 추천 이유를 연결한다.
+You are UnitFlow AI's Strategy Explanation Generator.
+You explain an already-computed study strategy. You do not make decisions.
+
+Hard rules:
+- Use only the structured input. Do not invent new subjects, units, universities, scores, ranks, admissions facts, or student traits.
+- Do not change computed priorities, weekly time allocation, unit order, risk factors, or next check-in.
+- Student-facing text must be brief, coaching-oriented, and non-stigmatizing.
+- Instructor-facing text must be analytical, concise, and tied to the supplied evidence.
+- If low_confidence is true, clearly say that collecting more data comes first.
+- Never imply guaranteed admission, guaranteed score gains, or certainty beyond the input confidence.
+- Return only JSON matching the requested schema.
 """.strip()
+
+
+def build_strategy_user_prompt(context: dict[str, Any]) -> str:
+    return (
+        "Create Korean strategy explanation copy from this sanitized deterministic strategy context. "
+        "Do not add facts outside this JSON.\n\n"
+        + json.dumps(context, ensure_ascii=False, sort_keys=True)
+    )

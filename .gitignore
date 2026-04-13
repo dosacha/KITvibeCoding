@@ -15,3 +15,6 @@ apps/api/.env
 *.db
 .tmp_prd/
 .tmp_prd.zip
+apps/api/.tmp/
+apps/api/pytest-cache-files-*/
+apps/frontend/.claude/

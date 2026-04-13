@@ -138,11 +138,29 @@ def _build_plan(
     next_check_in = (date.today() + timedelta(days=next_check_in_days)).isoformat()
 
     explanation_context = {
+        "student_profile_id": feature_snapshot.get("student", {}).get("student_id"),
         "variant": variant,
         "goal": goal,
         "primary_weakness": primary_weakness,
-        "top_subjects": [subject["subject_name"] for subject in subjects[:3]],
-        "top_units": [unit["unit_name"] for unit in unit_order[:4]],
+        "subject_priorities": [
+            {
+                "subject_code": subject.get("subject_code"),
+                "subject_name": subject.get("subject_name"),
+                "priority_score": subject.get("priority_score"),
+                "gap_score": subject.get("gap_score"),
+                "confidence": subject.get("confidence"),
+                "reason": subject.get("reason"),
+            }
+            for subject in subjects[:3]
+        ],
+        "weekly_time_allocation": weekly_time_allocation,
+        "unit_study_order": unit_order[:6],
+        "study_methods": methods,
+        "risk_factors": risk_factors,
+        "confidence_score": diagnosis_payload.get("confidence_score"),
+        "low_confidence": diagnosis_payload.get("low_confidence_flag", False),
+        "next_check_in": {"days": next_check_in_days, "date": next_check_in},
+        "instructor_rationale": diagnosis_payload.get("instructor_summary"),
     }
     copy = generate_explanations(explanation_context)
 
@@ -160,6 +178,7 @@ def _build_plan(
         "teacher_notes": diagnosis_payload.get("instructor_summary"),
         "student_message": diagnosis_payload.get("coaching_message"),
     }
+    plan["explanation"] = copy
     return {
         "variant": variant,
         "status": "pending_review",
@@ -174,6 +193,12 @@ def _build_plan(
             for subject in subjects[:3]
         ],
         "risk_factors": risk_factors,
+        "rationale_bullets": copy["rationale_bullets"],
+        "risk_translation": copy["risk_translation"],
+        "next_check_in_message": copy["next_check_in_message"],
+        "explanation_source": copy["explanation_source"],
+        "explanation_model": copy["explanation_model"],
+        "explanation_generated_at": copy["explanation_generated_at"],
         "instructor_explanation": copy["instructor_explanation"],
         "student_coaching": copy["student_coaching"],
     }

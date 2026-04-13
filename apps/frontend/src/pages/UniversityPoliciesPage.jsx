@@ -3,6 +3,7 @@ import Layout from '../components/Layout.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAsyncData } from '../hooks/useAsyncData.js';
+import { useFlashMessage } from '../hooks/useFlashMessage.js';
 import { apiRequest } from '../lib/api.js';
 
 // 대학 전형 프로필 관리자 화면 (admin 전용 저장 / instructor는 읽기 전용).
@@ -307,8 +308,7 @@ export default function UniversityPoliciesPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [form, setForm] = useState(blankForm());
   const [saving, setSaving] = useState(false);
-  const [pageMessage, setPageMessage] = useState('');
-  const [pageError, setPageError] = useState('');
+  const { message: pageMessage, isError: pageIsError, flash: showFlash, flashError: showError } = useFlashMessage(5000);
 
   const { data, loading, error, reload } = useAsyncData(
     async () => {
@@ -344,9 +344,6 @@ export default function UniversityPoliciesPage() {
       });
     }
   }, [data, selectedId]);
-
-  const showFlash = (msg) => { setPageMessage(msg); setPageError(''); };
-  const showError = (msg) => { setPageError(msg); setPageMessage(''); };
 
   const policies = data?.policies || [];
   const isNewMode = selectedId === NEW_POLICY;
@@ -412,8 +409,7 @@ export default function UniversityPoliciesPage() {
     <Layout title="대학 정책 관리" backTo="/instructor" backLabel="대시보드로 돌아가기">
       {loading ? <div className="empty-state">대학 정책을 불러오는 중입니다...</div> : null}
       {error ? <div className="error-box">{error}</div> : null}
-      {pageMessage ? <div className="info-box">{pageMessage}</div> : null}
-      {pageError ? <div className="error-box">{pageError}</div> : null}
+      {pageMessage ? <div className={pageIsError ? 'error-box' : 'info-box'}>{pageMessage}</div> : null}
 
       {!isAdmin ? (
         <div className="info-box warn">

@@ -59,6 +59,15 @@ def test_student_workspace_submit_and_instructor_review(client, auth_headers):
     workspace = workspace_response.json()["workspace"]
     assert workspace["status"] == "draft"
 
+    notes_response = client.post(
+        "/frontend/student/strategy-workspace/notes",
+        headers=student_headers,
+        json={"notes": "평일에는 수학을 먼저 배치하고 싶어."},
+    )
+    assert notes_response.status_code == 200, notes_response.text
+    assert notes_response.json()["student_workspace"]["notes"] == "평일에는 수학을 먼저 배치하고 싶어."
+    assert "review_timeline" in notes_response.json()
+
     submit_response = client.post("/frontend/student/strategy-workspace/submit", headers=student_headers)
     assert submit_response.status_code == 200, submit_response.text
     assert submit_response.json()["workspace"]["status"] == "submitted_for_review"
@@ -93,6 +102,9 @@ def test_student_planner_generate_check_and_reflect(client, auth_headers):
     assert generated.status_code == 200, generated.text
     plan = generated.json()["plan"]
     assert plan["items"]
+    assert "planned_total_minutes" in plan
+    assert "completion_rate_cached" in plan
+    assert "status" in plan["items"][0]
 
     first_item_id = plan["items"][0]["id"]
     checked = client.post(
@@ -103,6 +115,15 @@ def test_student_planner_generate_check_and_reflect(client, auth_headers):
     assert checked.status_code == 200, checked.text
     updated_plan = checked.json()["plan"]
     assert updated_plan["summary"]["completed_minutes"] >= 30
+
+    unchecked = client.post(
+        f"/frontend/student/planner/items/{first_item_id}/check",
+        headers=headers,
+        json={"completed": False, "completed_minutes": 0},
+    )
+    assert unchecked.status_code == 200, unchecked.text
+    unchecked_item = next(item for item in unchecked.json()["plan"]["items"] if item["id"] == first_item_id)
+    assert unchecked_item["status"] == "planned"
 
     reflection = client.post(
         f"/frontend/student/planner/{plan['id']}/reflection",
@@ -116,6 +137,19 @@ def test_student_planner_generate_check_and_reflect(client, auth_headers):
     )
     assert reflection.status_code == 200, reflection.text
     assert reflection.json()["plan"]["reflections"]
+
+    current_reflection = client.post(
+        "/frontend/student/planner/reflection",
+        headers=headers,
+        json={
+            "went_well": "수학 루틴을 지켰어.",
+            "stuck_at": "영어 지문 시간이 부족했어.",
+            "why_failed": "오답 정리가 밀렸어.",
+            "next_week_changes": "영어를 하루 앞당길게.",
+        },
+    )
+    assert current_reflection.status_code == 200, current_reflection.text
+    assert current_reflection.json()["reflection"]["went_well"] == "수학 루틴을 지켰어."
 
     summary = client.get(f"/frontend/student/planner/{plan['id']}/summary", headers=headers)
     assert summary.status_code == 200, summary.text

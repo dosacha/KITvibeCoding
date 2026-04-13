@@ -6,6 +6,7 @@ import ResultEntryTable from '../components/ResultEntryTable.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAsyncData } from '../hooks/useAsyncData.js';
+import { useFlashMessage } from '../hooks/useFlashMessage.js';
 import { apiBaseUrl, apiRequest } from '../lib/api.js';
 
 // 시험 운영 페이지.
@@ -48,8 +49,7 @@ export default function ExamsPage() {
   const { token, user } = useAuth();
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [pageMessage, setPageMessage] = useState('');
-  const [pageError, setPageError] = useState('');
+  const { message: pageMessage, isError: pageIsError, flash: showFlash, flashError: showError } = useFlashMessage(5000);
 
   // 시험 목록 + 메타데이터.
   const {
@@ -91,14 +91,7 @@ export default function ExamsPage() {
     }
   }, [indexData, selectedExamId]);
 
-  const showFlash = (msg) => {
-    setPageMessage(msg);
-    setPageError('');
-  };
-  const showError = (msg) => {
-    setPageError(msg);
-    setPageMessage('');
-  };
+
 
   // ----- 시험 생성 / 수정 -----------------------------------------------------
 
@@ -231,8 +224,7 @@ export default function ExamsPage() {
     <Layout title="시험 운영" backTo="/instructor" backLabel="대시보드로 돌아가기">
       {indexLoading ? <div className="empty-state">시험 운영 데이터를 불러오는 중입니다...</div> : null}
       {indexError ? <div className="error-box">{indexError}</div> : null}
-      {pageMessage ? <div className="info-box">{pageMessage}</div> : null}
-      {pageError ? <div className="error-box">{pageError}</div> : null}
+      {pageMessage ? <div className={pageIsError ? 'error-box' : 'info-box'}>{pageMessage}</div> : null}
 
       {indexData ? (
         <div className="exams-layout">

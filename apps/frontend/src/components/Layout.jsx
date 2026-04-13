@@ -10,12 +10,12 @@ const ROLE_LABEL = {
 };
 
 const STUDENT_NAV = [
-  { to: '/student', label: '홈', icon: '홈', end: true },
-  { to: '/student/diagnosis', label: '진단', icon: '진' },
-  { to: '/student/strategy-workspace', label: '전략 설계실', icon: '전' },
-  { to: '/student/planner', label: '주간 플래너', icon: '계' },
-  { to: '/student/growth', label: '성장 리포트', icon: '성' },
-  { to: '/student/simulator', label: '시뮬레이터', icon: '실' },
+  { to: '/student', label: '홈', mobileLabel: '홈', end: true },
+  { to: '/student/diagnosis', label: '진단', mobileLabel: '진단' },
+  { to: '/student/strategy-workspace', label: '전략 설계실', mobileLabel: '전략' },
+  { to: '/student/planner', label: '주간 플래너', mobileLabel: '플래너' },
+  { to: '/student/growth', label: '성장 리포트', mobileLabel: '성장' },
+  { to: '/student/simulator', label: '시뮬레이터', mobileLabel: '시뮬' },
 ];
 
 export default function Layout({ title, children, backTo, backLabel = '뒤로' }) {
@@ -34,9 +34,8 @@ export default function Layout({ title, children, backTo, backLabel = '뒤로' }
 
         <nav className="nav-menu">
           {isStudent ? (
-            STUDENT_NAV.map(({ to, label, icon, end }) => (
+            STUDENT_NAV.map(({ to, label, end }) => (
               <NavLink key={to} className={linkClass} to={to} end={end}>
-                <span className="nav-icon" aria-hidden="true">{icon}</span>
                 {label}
               </NavLink>
             ))
@@ -88,15 +87,14 @@ export default function Layout({ title, children, backTo, backLabel = '뒤로' }
 
       {isStudent ? (
         <nav className="student-bottom-nav" aria-label="학생 하단 메뉴">
-          {STUDENT_NAV.slice(0, 5).map(({ to, label, icon, end }) => (
+          {STUDENT_NAV.map(({ to, mobileLabel, end }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
               className={({ isActive }) => `bottom-nav-item${isActive ? ' active' : ''}`}
             >
-              <span className="bottom-nav-icon">{icon}</span>
-              <span className="bottom-nav-label">{label}</span>
+              <span className="bottom-nav-label">{mobileLabel}</span>
             </NavLink>
           ))}
         </nav>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections import defaultdict
 from datetime import date, datetime
 from typing import Any
@@ -30,6 +32,8 @@ from ..models import (
 )
 from .audit import mark_job_completed, mark_job_failed, mark_job_processing, record_audit
 
+
+logger = logging.getLogger("unitflow.strategy_explanation")
 
 VALID_RESPONSE_STATUSES = {SubmissionStatus.SUBMITTED, SubmissionStatus.UNANSWERED}
 MASTERY_COUNT_STATUSES = {SubmissionStatus.SUBMITTED, SubmissionStatus.UNANSWERED}
@@ -255,6 +259,23 @@ def recalculate_student_bundle(
         db.add(strategy)
         strategy_objects.append(strategy)
     db.flush()
+    for strategy in strategy_objects:
+        explanation = (strategy.structured_plan or {}).get("explanation") or {}
+        logger.info(
+            json.dumps(
+                {
+                    "event": "strategy_explanation_persisted",
+                    "strategy_id": strategy.id,
+                    "student_profile_id": student.id,
+                    "explanation_source": explanation.get("explanation_source", "deterministic_fallback"),
+                    "model": explanation.get("explanation_model"),
+                    "llm_error_type": None,
+                    "llm_error_message": None,
+                    "latency_ms": None,
+                },
+                ensure_ascii=False,
+            )
+        )
 
     record_audit(
         db,

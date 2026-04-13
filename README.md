@@ -51,7 +51,7 @@ curl http://127.0.0.1:8000/health
 정상 응답:
 
 ```json
-{"status":"ok"}
+{"status":"ok","environment":"development","database":"ok"}
 ```
 
 ## 2. 프런트엔드 처음 실행
@@ -114,6 +114,7 @@ python manage_db.py seed
 - 목표 대학 정책 관리
 - 학생별 전략 비교와 강사 승인
 - 학생에게 승인된 전략만 노출
+- 전략 설명 생성기: deterministic 전략 결과를 학생용 코칭 문장과 강사용 설명으로 변환
 - 감사 로그, 변경 이력, 재계산 작업 조회
 
 ## 주요 API
@@ -127,8 +128,27 @@ python manage_db.py seed
 
 - `GET /frontend/dashboard/instructor`
 - `GET /frontend/dashboard/student`
+- `GET /frontend/student/home`
+- `GET /frontend/student/diagnosis`
+- `GET /frontend/student/goal-gap`
+- `GET /frontend/student/admission-direction`
+- `GET /frontend/student/study-recipes`
+- `GET /frontend/student/strategy-workspace`
+- `POST /frontend/student/strategy-workspace`
+- `POST /frontend/student/strategy-workspace/submit`
+- `GET /frontend/student/planner`
+- `POST /frontend/student/planner/generate`
+- `POST /frontend/student/planner/items/{item_id}/check`
+- `POST /frontend/student/planner/{plan_id}/reflection`
+- `GET /frontend/student/growth`
+- `POST /frontend/student/simulations/goal-scenario`
+- `GET /frontend/student/onboarding`
+- `PUT /frontend/student/onboarding/profile`
+- `POST /frontend/student/onboarding/habits`
 - `GET /frontend/students/{student_id}`
 - `GET /frontend/students/{student_id}/strategy-options`
+- `GET /frontend/instructor/students/{student_id}/strategy-review`
+- `POST /frontend/strategy-workspaces/{workspace_id}/reviews`
 - `GET /frontend/exams`
 - `GET /frontend/exams/{exam_id}`
 - `GET /frontend/exams/{exam_id}/result-entry`
@@ -166,7 +186,7 @@ python -m pytest tests
 현재 통과 기준:
 
 ```text
-27 passed
+42 passed
 ```
 
 프런트:
@@ -239,6 +259,60 @@ npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
 ## 운영 메모
 
 - 로컬 개발 기본 DB는 SQLite다.
-- 운영 환경에서는 PostgreSQL 사용을 권장한다.
+- 폐쇄형 베타/스테이징은 PostgreSQL 기준으로 실행한다.
+- PostgreSQL URL 예시는 `postgresql+psycopg://unitflow:unitflow@localhost:5432/unitflow` 이다.
+- 운영 DB에는 `python manage_db.py upgrade`로 Alembic 마이그레이션을 적용하고, 데모 환경에는 `python manage_db.py seed`로 샘플 계정을 주입한다.
 - `APP_ENV=production`에서는 SQLite 사용을 피한다.
-- LLM 호출은 선택 사항이며, API 키가 없어도 deterministic fallback 전략이 동작한다.
+- 요청 로그는 JSON line 형태로 출력되며 `LOG_LEVEL`로 조정한다.
+- LLM 호출은 선택 사항이며, API 키가 없어도 deterministic fallback 전략 설명이 동작한다.
+
+## 전략 설명 생성기
+
+UnitFlow AI의 전략 계산은 deterministic engine이 담당한다. LLM은 취약 유형, 목표대학 gap, 과목 우선순위, 주간 시간 배분, 단원 순서, 위험 요인을 바꾸지 않고 설명 문장만 생성한다.
+
+설명 출력은 항상 같은 shape를 가진다.
+
+```json
+{
+  "summary": "string",
+  "student_coaching": "string",
+  "instructor_explanation": "string",
+  "rationale_bullets": [{"label": "string", "detail": "string"}],
+  "risk_translation": [{"label": "string", "detail": "string"}],
+  "next_check_in_message": "string",
+  "explanation_source": "llm",
+  "explanation_model": "gpt-5.4-mini",
+  "explanation_generated_at": "2026-04-13T00:00:00"
+}
+```
+
+`OPENAI_API_KEY`가 없거나, `OPENAI_STRATEGY_EXPLANATION_ENABLED=false`이거나, 네트워크/timeout/API 오류가 발생하면 같은 shape로 deterministic fallback이 반환된다. 이때 `explanation_source`는 `deterministic_fallback`, `explanation_model`은 `null`이다.
+
+LLM 설명 생성 활성화:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_STRATEGY_EXPLANATION_ENABLED=true
+OPENAI_STRATEGY_EXPLANATION_TIMEOUT_SECONDS=8
+```
+
+관찰 가능성:
+
+- `strategy_explanation_generated`: OpenAI 호출 성공/실패, source, model, error type/message, latency 기록
+- `strategy_explanation_finalized`: 최종 설명 source 기록
+- `strategy_explanation_persisted`: DB에 저장된 strategy id 기준 source 기록
+
+해커톤 데모에서는 강사 전략 비교 응답의 `explanation_source`로 LLM 설명인지 fallback 설명인지 확인할 수 있다.
+
+## 폐쇄형 베타 데모 흐름
+
+1. 관리자로 로그인해 대학 정책과 감사/재계산 작업을 확인한다.
+2. 강사로 로그인해 시험, 문항, 학생 결과 또는 CSV 업로드를 입력하고 학생 재계산을 실행한다.
+3. 학생으로 로그인해 온보딩, 방향성, 목표대학 gap, 진단 상세, 학습 레시피를 확인한다.
+4. 학생이 전략 설계실에서 AI 기본안/보수안과 승인본을 비교하고 수정안을 저장한 뒤 검토 요청을 보낸다.
+5. 강사가 학생 전략 검토 화면에서 AI안/학생 수정안/승인본 diff를 보고 승인, 보류, 수정 요청 중 하나를 선택한다.
+6. 학생이 승인 전략을 기준으로 주간 플래너를 생성하고 체크/회고를 남긴다.
+7. 학생이 성장 리포트와 What-if 시뮬레이션으로 다음 조정 포인트를 확인한다.
+
+상세 운영 절차는 `docs/beta-operations-guide.md`를 기준으로 한다.

@@ -103,6 +103,9 @@ def build_student_dashboard(db: Session, *, current_user: User) -> dict[str, Any
             "summary": approved_strategy.natural_language_summary,
             "plan": approved_strategy.structured_plan,
             "student_coaching": approved_strategy.student_coaching,
+            "explanation_source": (approved_strategy.structured_plan or {}).get("explanation", {}).get("explanation_source", "deterministic_fallback"),
+            "explanation_model": (approved_strategy.structured_plan or {}).get("explanation", {}).get("explanation_model"),
+            "explanation_generated_at": (approved_strategy.structured_plan or {}).get("explanation", {}).get("explanation_generated_at"),
         },
         "review_notice": None if approved_strategy else "강사 승인된 전략이 아직 없어, 마지막 승인본 또는 대기 상태를 기다리는 중입니다.",
     }
@@ -546,6 +549,7 @@ _SHOWN_PENDING_STATUSES = {StrategyStatus.PENDING_REVIEW, StrategyStatus.DRAFT, 
 
 
 def _serialize_strategy(strategy: StudentStrategy, *, approved_id: int | None, student_visible_id: int | None) -> dict[str, Any]:
+    explanation = (strategy.structured_plan or {}).get("explanation") or {}
     return {
         "id": strategy.id,
         "variant": strategy.variant,
@@ -556,6 +560,12 @@ def _serialize_strategy(strategy: StudentStrategy, *, approved_id: int | None, s
         "risk_factors": strategy.risk_factors or [],
         "instructor_explanation": strategy.instructor_explanation or "",
         "student_coaching": strategy.student_coaching or "",
+        "rationale_bullets": explanation.get("rationale_bullets", []),
+        "risk_translation": explanation.get("risk_translation", []),
+        "next_check_in_message": explanation.get("next_check_in_message"),
+        "explanation_source": explanation.get("explanation_source", "deterministic_fallback"),
+        "explanation_model": explanation.get("explanation_model"),
+        "explanation_generated_at": explanation.get("explanation_generated_at"),
         "generated_at": strategy.generated_at,
         "is_approved": strategy.id == approved_id,
         "is_student_visible": strategy.id == student_visible_id,

@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
+    log_level: str = "INFO"
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
+    openai_strategy_explanation_enabled: bool = True
+    openai_strategy_explanation_timeout_seconds: float = 8.0
 
     cors_origins: str = (
         "http://127.0.0.1:5173,http://localhost:5173,"

@@ -44,6 +44,10 @@ def test_strategy_options_returns_latest_set(client, auth_headers):
         assert "risk_factors" in variant
         assert "instructor_explanation" in variant
         assert "student_coaching" in variant
+        assert variant["explanation_source"] in {"llm", "deterministic_fallback"}
+        assert "rationale_bullets" in variant
+        assert "risk_translation" in variant
+        assert "next_check_in_message" in variant
         assert isinstance(variant["is_approved"], bool)
         assert isinstance(variant["is_student_visible"], bool)
 

@@ -87,6 +87,15 @@ def update_student_strategy_workspace(
     return student_frontend_v2.save_strategy_workspace(db, current_user=current_user, payload=payload)
 
 
+@router.post("/student/strategy-workspace/notes")
+def save_student_strategy_workspace_notes(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.save_strategy_workspace_note(db, current_user=current_user, payload=payload)
+
+
 @router.delete("/student/strategy-workspace/reset")
 def reset_student_strategy_workspace(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.STUDENT))):
     return student_frontend_v2.reset_strategy_workspace(db, current_user=current_user)
@@ -138,6 +147,15 @@ def save_student_planner_reflection(
     current_user=Depends(require_roles(Role.STUDENT)),
 ):
     return student_frontend_v2.save_plan_reflection(db, current_user=current_user, plan_id=plan_id, payload=payload)
+
+
+@router.post("/student/planner/reflection")
+def save_current_student_planner_reflection(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.save_current_plan_reflection(db, current_user=current_user, payload=payload)
 
 
 @router.get("/student/planner/{plan_id}/summary")

@@ -1,9 +1,121 @@
+// FE-501~504: 성장 리포트
+// 점수 트렌드 막대, gap 감소 시각화, 실행률 추이, 안정성 흐름.
+
 import Layout from '../components/Layout.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAsyncData } from '../hooks/useAsyncData.js';
 import { apiRequest } from '../lib/api.js';
 import { formatNumber, weaknessLabel } from '../lib/studentLabels.js';
+
+// 점수 막대 차트 (과목별 히스토리)
+function ScoreTrendChart({ scoreTrend }) {
+  if (!scoreTrend?.length) return <p className="muted small">점수 데이터가 없어.</p>;
+
+  return (
+    <div className="score-trend-chart">
+      {scoreTrend.map((subject) => {
+        const points = subject.points || [];
+        if (!points.length) return null;
+        const latest = points[points.length - 1];
+        const prev = points[points.length - 2];
+        const delta = prev ? latest.score - prev.score : null;
+
+        return (
+          <div key={subject.subject_code} className="score-subject-block">
+            <div className="score-subject-header">
+              <strong>{subject.subject_name}</strong>
+              <span>
+                {formatNumber(latest.score)}점
+                {delta != null ? (
+                  <span
+                    className="muted small"
+                    style={{ marginLeft: '0.35rem', color: delta >= 0 ? '#16a34a' : '#dc2626' }}
+                  >
+                    {delta >= 0 ? `+${formatNumber(delta)}` : formatNumber(delta)}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+            <div className="score-point-list">
+              {points.map((point) => {
+                const pct = Math.min(100, Math.round((point.score / 100) * 100));
+                return (
+                  <div key={`${subject.subject_code}-${point.exam_date}`} className="score-point-row">
+                    <span className="score-point-label">{point.exam_name || point.exam_date}</span>
+                    <div className="score-bar-track">
+                      <div className="score-bar-fill" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="score-value">{formatNumber(point.score)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Gap 감소 막대 차트
+function GapTrendChart({ gapTrend }) {
+  if (!gapTrend?.length) return <p className="muted small">gap 데이터가 없어.</p>;
+
+  const maxGap = Math.max(...gapTrend.map((g) => g.max_gap ?? g.current_gap ?? 0), 1);
+
+  return (
+    <div className="gap-trend-chart">
+      {gapTrend.map((item) => {
+        const cur = item.current_gap ?? 0;
+        const prev = item.prev_gap ?? cur;
+        const pct = Math.min(100, Math.round((cur / maxGap) * 100));
+        const delta = cur - prev;
+
+        return (
+          <div key={item.subject_code} className="gap-trend-row">
+            <span className="gap-trend-subject">{item.subject_name}</span>
+            <div className="gap-trend-bar-track">
+              <div className="gap-trend-bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="gap-trend-value">
+              {formatNumber(cur)}점
+              {delta !== 0 ? (
+                <span
+                  style={{ marginLeft: '0.3rem', color: delta < 0 ? '#16a34a' : '#dc2626', fontSize: '0.75rem' }}
+                >
+                  {delta < 0 ? `▼${formatNumber(Math.abs(delta))}` : `▲${formatNumber(delta)}`}
+                </span>
+              ) : null}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 실행률 추이 막대
+function ExecutionTrend({ executionTrend }) {
+  if (!executionTrend?.length) return <p className="muted small">실행률 데이터가 없어.</p>;
+
+  return (
+    <div className="execution-trend">
+      {executionTrend.map((week, i) => {
+        const pct = Math.min(100, Math.round((week.completion_rate || 0) * 100));
+        return (
+          <div key={week.week_start || i} className="execution-week-row">
+            <span className="execution-week-label">{week.week_start || `${i + 1}주 전`}</span>
+            <div className="execution-bar-track">
+              <div className="execution-bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="execution-rate-value">{pct}%</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function StudentGrowthPage() {
   const { token } = useAuth();
@@ -19,45 +131,101 @@ export default function StudentGrowthPage() {
 
       {data ? (
         <>
-          <SectionCard title="성장 요약" subtitle="점수, 목표대학 gap, 안정성 변화를 함께 봐.">
+          {/* 성장 요약 */}
+          <SectionCard title="성장 요약" subtitle="점수, 목표대학 gap, 실행률 변화를 한눈에 봐.">
             <div className="highlight-card">
-              <h3>{data.summary}</h3>
+              <h3 style={{ marginBottom: 0 }}>{data.summary || '최근 결과와 실행 기록을 바탕으로 다음 조정 포인트를 확인해보자.'}</h3>
               {data.weakness_shift ? (
-                <p className="muted">
-                  현재 집중 보완 유형: {data.weakness_shift.label || weaknessLabel(data.weakness_shift.current)}
+                <p className="muted" style={{ margin: 0 }}>
+                  현재 집중 보완 유형:{' '}
+                  <strong>
+                    {data.weakness_shift.label || weaknessLabel(data.weakness_shift.current)}
+                  </strong>
+                  {data.weakness_shift.prev && data.weakness_shift.current !== data.weakness_shift.prev
+                    ? ` (이전: ${data.weakness_shift.prev_label || weaknessLabel(data.weakness_shift.prev)})`
+                    : ''}
                 </p>
               ) : null}
             </div>
-          </SectionCard>
 
-          <SectionCard title="과목별 점수 흐름" subtitle="최근 시험 점수 변화를 과목별로 확인해.">
-            <div className="split-grid">
-              {(data.score_trend || []).map((subject) => (
-                <div key={subject.subject_code} className="evidence-card">
-                  <strong>{subject.subject_name}</strong>
-                  <div className="simple-list">
-                    {(subject.points || []).map((point) => (
-                      <div key={`${subject.subject_code}-${point.exam_date}`} className="list-row">
-                        <span>{point.exam_name}</span>
-                        <strong>{formatNumber(point.score)}점</strong>
-                      </div>
-                    ))}
+            {/* 핵심 수치 */}
+            {data.key_metrics?.length > 0 ? (
+              <div className="growth-metric-row" style={{ marginTop: '0.75rem' }}>
+                {data.key_metrics.map((m, i) => (
+                  <div key={i} className="metric-card">
+                    <span className="metric-label">{m.label}</span>
+                    <strong className="metric-value">
+                      {formatNumber(m.value)}{m.unit || ''}
+                    </strong>
+                    {m.delta != null ? (
+                      <span
+                        className="small"
+                        style={{ color: m.delta >= 0 ? '#16a34a' : '#dc2626' }}
+                      >
+                        {m.delta >= 0 ? `+${formatNumber(m.delta)}` : formatNumber(m.delta)}{m.unit || ''}
+                      </span>
+                    ) : null}
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : null}
           </SectionCard>
 
-          <SectionCard title="안정성 흐름" subtitle="점수 변동이 줄어드는지도 같이 확인해.">
-            <div className="simple-list">
-              {(data.stability_trend || []).map((item) => (
-                <div key={item.subject_code} className="list-row">
-                  <strong>{item.subject_name}</strong>
-                  <span>안정도 {formatNumber(item.stability)}</span>
-                </div>
-              ))}
-            </div>
+          {/* 과목별 점수 흐름 */}
+          <SectionCard title="과목별 점수 흐름" subtitle="최근 시험에서 점수가 어떻게 바뀌었는지 봐.">
+            <ScoreTrendChart scoreTrend={data.score_trend} />
           </SectionCard>
+
+          {/* 목표대학 Gap 감소 추이 */}
+          {data.gap_trend?.length > 0 ? (
+            <SectionCard
+              title="목표대학 Gap 변화"
+              subtitle="gap이 줄어들수록 목표대학에 가까워지는 거야."
+            >
+              <GapTrendChart gapTrend={data.gap_trend} />
+            </SectionCard>
+          ) : null}
+
+          {/* 주간 실행률 추이 */}
+          {data.execution_trend?.length > 0 ? (
+            <SectionCard
+              title="주간 실행률 추이"
+              subtitle="계획 대비 실제 수행률 변화야. 꾸준함이 중요해."
+            >
+              <ExecutionTrend executionTrend={data.execution_trend} />
+            </SectionCard>
+          ) : null}
+
+          {/* 안정성 흐름 */}
+          {data.stability_trend?.length > 0 ? (
+            <SectionCard
+              title="점수 안정성"
+              subtitle="값이 높을수록 점수 변동이 적어서 안정적이야."
+            >
+              <div className="simple-list">
+                {data.stability_trend.map((item) => {
+                  const pct = Math.min(100, Math.round((item.stability ?? 0) * 100));
+                  return (
+                    <div key={item.subject_code} className="list-row">
+                      <strong>{item.subject_name}</strong>
+                      <div style={{ flex: 1, maxWidth: '8rem' }}>
+                        <div className="score-bar-track">
+                          <div
+                            className="score-bar-fill"
+                            style={{
+                              width: `${pct}%`,
+                              background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span className="muted small">{formatNumber(item.stability * 100, 0)}점</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+          ) : null}
         </>
       ) : null}
     </Layout>

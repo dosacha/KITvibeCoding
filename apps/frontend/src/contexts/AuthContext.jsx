@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { apiRequest } from '../lib/api.js';
+import { apiRequest, registerUnauthorizedHandler } from '../lib/api.js';
 
 const STORAGE_KEY = 'unitflow-auth';
 const AuthContext = createContext(null);
@@ -59,6 +59,12 @@ export function AuthProvider({ children }) {
     setToken('');
     setUser(null);
   }, []);
+
+  // 401 응답 시 자동 로그아웃
+  useEffect(() => {
+    registerUnauthorizedHandler(logout);
+    return () => registerUnauthorizedHandler(null);
+  }, [logout]);
 
   const value = useMemo(
     () => ({ token, user, loading, login, logout, refreshMe, isAuthenticated: Boolean(token) }),

@@ -460,6 +460,7 @@ def _normalize_strategy(strategy: StudentStrategy | None) -> dict[str, Any] | No
     if strategy is None:
         return None
     plan = strategy.structured_plan or {}
+    explanation = plan.get("explanation") or {}
     return {
         "id": strategy.id,
         "variant": strategy.variant,
@@ -469,6 +470,12 @@ def _normalize_strategy(strategy: StudentStrategy | None) -> dict[str, Any] | No
         "summary": strategy.natural_language_summary,
         "student_coaching": strategy.student_coaching,
         "instructor_explanation": strategy.instructor_explanation,
+        "rationale_bullets": explanation.get("rationale_bullets", []),
+        "risk_translation": explanation.get("risk_translation", []),
+        "next_check_in_message": explanation.get("next_check_in_message"),
+        "explanation_source": explanation.get("explanation_source", "deterministic_fallback"),
+        "explanation_model": explanation.get("explanation_model"),
+        "explanation_generated_at": explanation.get("explanation_generated_at"),
         "weekly_time_allocation": plan.get("weekly_time_allocation") or [],
         "unit_study_order": plan.get("unit_study_order") or [],
         "study_methods": plan.get("study_methods") or [],
@@ -510,6 +517,7 @@ def _workspace_payload(workspace: StudentStrategyWorkspace | None) -> dict[str, 
         "overrides": workspace.overrides or {},
         "merged_plan": _merge_strategy_with_overrides(workspace.base_strategy, workspace.overrides),
         "student_note": workspace.student_note,
+        "notes": workspace.student_note,
         "instructor_message": workspace.instructor_message,
         "submitted_at": workspace.submitted_at,
         "reviewed_at": workspace.reviewed_at,
@@ -545,14 +553,31 @@ def build_strategy_workspace(db: Session, *, current_user: User) -> dict[str, An
     conservative = _latest_strategy(student, variant="conservative")
     approved = _latest_approved_strategy(student)
     workspace = _latest_workspace(db, student.id)
+    workspace_payload = _workspace_payload(workspace)
+    timeline = build_workspace_timeline(db, current_user=current_user)["timeline"]
+    status_value = _enum_value(workspace.status) if workspace else "not_started"
+    review_status = "pending_review" if status_value == StrategyWorkspaceStatus.SUBMITTED_FOR_REVIEW.value else status_value
     return {
         "ai_basic": _normalize_strategy(basic),
         "ai_conservative": _normalize_strategy(conservative),
         "approved": _normalize_strategy(approved),
-        "student_draft": _workspace_payload(workspace),
-        "review_status": _enum_value(workspace.status) if workspace else "not_started",
+        "student_draft": workspace_payload,
+        "student_workspace": workspace_payload,
+        "review_status": review_status,
+        "workspace_status": status_value,
         "review_status_label": WORKSPACE_STATUS_LABELS.get(_enum_value(workspace.status), "아직 작성 전") if workspace else "아직 작성 전",
-        "timeline": build_workspace_timeline(db, current_user=current_user)["timeline"],
+        "timeline": timeline,
+        "review_timeline": [
+            {
+                "step": item["type"],
+                "label": item["label"],
+                "timestamp": item.get("at"),
+                "done": True,
+                "message": item.get("message"),
+            }
+            for item in timeline
+        ],
+        "instructor_feedback": workspace.instructor_message if workspace else None,
         "guide": "AI안은 참고안이고, 학생 수정안은 강사 승인 전까지 공식 전략이 아니야.",
     }
 
@@ -627,6 +652,48 @@ def save_strategy_workspace(db: Session, *, current_user: User, payload: dict[st
     db.commit()
     db.refresh(workspace)
     return {"workspace": _workspace_payload(workspace)}
+
+
+def save_strategy_workspace_note(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    workspace = _latest_workspace(db, student.id)
+    if workspace is None or workspace.status in {StrategyWorkspaceStatus.RESET, StrategyWorkspaceStatus.APPROVED}:
+        base_strategy = _latest_approved_strategy(student) or _latest_strategy(student, variant="basic")
+        workspace = StudentStrategyWorkspace(
+            student_profile_id=student.id,
+            base_strategy_id=base_strategy.id if base_strategy else None,
+            status=StrategyWorkspaceStatus.DRAFT,
+            overrides={},
+        )
+        db.add(workspace)
+        db.flush()
+
+    before = {"student_note": workspace.student_note}
+    workspace.student_note = payload.get("student_note", payload.get("notes"))
+    if workspace.status not in {
+        StrategyWorkspaceStatus.SUBMITTED_FOR_REVIEW,
+        StrategyWorkspaceStatus.REVIEWED,
+        StrategyWorkspaceStatus.REVISE_REQUESTED,
+    }:
+        workspace.status = StrategyWorkspaceStatus.DRAFT
+    record_changes(
+        db,
+        actor_user_id=current_user.id,
+        entity_type="student_strategy_workspaces",
+        entity_id=workspace.id,
+        before=before,
+        after={"student_note": workspace.student_note},
+    )
+    record_audit(
+        db,
+        actor_user_id=current_user.id,
+        entity_type="student_strategy_workspaces",
+        entity_id=workspace.id,
+        action="save_note",
+        payload={"student_id": student.id},
+    )
+    db.commit()
+    return build_strategy_workspace(db, current_user=current_user)
 
 
 def submit_strategy_workspace(db: Session, *, current_user: User) -> dict[str, Any]:
@@ -782,10 +849,15 @@ def _serialize_plan(plan: WeeklyPlan | None) -> dict[str, Any] | None:
     total = sum(item.planned_minutes for item in plan.items)
     completed = sum(item.completed_minutes for item in plan.items)
     checked = sum(1 for item in plan.items if item.is_checked)
+    completion_rate = round(completed / max(total, 1), 3)
     return {
         "id": plan.id,
         "week_start": plan.week_start,
+        "week_end": plan.week_end,
         "status": _enum_value(plan.status),
+        "planned_total_minutes": total,
+        "completed_total_minutes": completed,
+        "completion_rate_cached": completion_rate,
         "items": [
             {
                 "id": item.id,
@@ -795,9 +867,12 @@ def _serialize_plan(plan: WeeklyPlan | None) -> dict[str, Any] | None:
                 "unit_name": item.unit_name,
                 "planned_minutes": item.planned_minutes,
                 "completed_minutes": item.completed_minutes,
+                "status": _enum_value(item.status),
+                "day_of_week": item.day_of_week,
                 "day_bucket": item.day_bucket,
                 "priority": item.priority,
                 "rollover_allowed": item.rollover_allowed,
+                "carry_over": item.rollover_from_item_id is not None or item.status == WeeklyPlanItemStatus.ROLLED_OVER,
                 "is_checked": item.is_checked,
                 "student_note": item.student_note,
             }
@@ -806,7 +881,7 @@ def _serialize_plan(plan: WeeklyPlan | None) -> dict[str, Any] | None:
         "summary": {
             "planned_minutes": total,
             "completed_minutes": completed,
-            "completion_rate": round(completed / max(total, 1), 3),
+            "completion_rate": completion_rate,
             "checked_count": checked,
             "item_count": len(plan.items),
         },
@@ -817,6 +892,10 @@ def _serialize_plan(plan: WeeklyPlan | None) -> dict[str, Any] | None:
                 "blocked": reflection.blocked,
                 "failure_reason": reflection.failure_reason,
                 "next_adjustment": reflection.next_adjustment,
+                "went_well": reflection.good or reflection.wins_text,
+                "stuck_at": reflection.blocked or reflection.blocker_text,
+                "why_failed": reflection.failure_reason,
+                "next_week_changes": reflection.next_adjustment or reflection.adjustment_note,
                 "created_at": reflection.created_at,
             }
             for reflection in sorted(plan.reflections, key=lambda item: item.created_at, reverse=True)
@@ -833,9 +912,11 @@ def build_planner(db: Session, *, current_user: User, week_start: str | None = N
         .filter(WeeklyPlan.student_profile_id == student.id, WeeklyPlan.week_start == start)
         .one_or_none()
     )
+    serialized_plan = _serialize_plan(plan)
     return {
         "week_start": start,
-        "plan": _serialize_plan(plan),
+        "plan": serialized_plan,
+        "reflection": None if not serialized_plan or not serialized_plan["reflections"] else serialized_plan["reflections"][0],
         "empty_state": None if plan else "아직 이번 주 계획이 없어. 승인 전략이나 저장한 수정안을 바탕으로 생성할 수 있어.",
     }
 
@@ -850,7 +931,7 @@ def check_plan_item(db: Session, *, current_user: User, item_id: int, payload: d
     )
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="계획 항목을 찾을 수 없어.")
-    item.is_checked = bool(payload.get("checked", True))
+    item.is_checked = bool(payload.get("checked", payload.get("completed", True)))
     if payload.get("completed_minutes") is not None:
         completed = int(payload["completed_minutes"])
         if completed < 0 or completed > 24 * 60:
@@ -902,13 +983,13 @@ def save_plan_reflection(db: Session, *, current_user: User, plan_id: int, paylo
             plan_id=plan.id,
             student_profile_id=student.id,
             reflection_type=payload.get("reflection_type", "weekly"),
-            wins_text=payload.get("wins_text") or payload.get("good"),
-            blocker_text=payload.get("blocker_text") or payload.get("blocked"),
-            good=payload.get("good"),
-            blocked=payload.get("blocked"),
-            failure_reason=payload.get("failure_reason"),
-            adjustment_note=payload.get("adjustment_note") or payload.get("next_adjustment"),
-            next_adjustment=payload.get("next_adjustment"),
+            wins_text=payload.get("wins_text") or payload.get("good") or payload.get("went_well"),
+            blocker_text=payload.get("blocker_text") or payload.get("blocked") or payload.get("stuck_at"),
+            good=payload.get("good") or payload.get("went_well"),
+            blocked=payload.get("blocked") or payload.get("stuck_at"),
+            failure_reason=payload.get("failure_reason") or payload.get("why_failed"),
+            adjustment_note=payload.get("adjustment_note") or payload.get("next_adjustment") or payload.get("next_week_changes"),
+            next_adjustment=payload.get("next_adjustment") or payload.get("next_week_changes"),
         )
     )
     record_audit(
@@ -922,6 +1003,22 @@ def save_plan_reflection(db: Session, *, current_user: User, plan_id: int, paylo
     db.commit()
     db.expire_all()
     return build_planner(db, current_user=current_user, week_start=plan.week_start.isoformat())
+
+
+def save_current_plan_reflection(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    start = _week_start(payload.get("week_start"))
+    plan = (
+        db.query(WeeklyPlan)
+        .filter(WeeklyPlan.student_profile_id == student.id, WeeklyPlan.week_start == start)
+        .one_or_none()
+    )
+    if plan is None:
+        generated = generate_weekly_plan(db, current_user=current_user, week_start=start.isoformat())
+        plan_id = generated["plan"]["id"]
+    else:
+        plan_id = plan.id
+    return save_plan_reflection(db, current_user=current_user, plan_id=plan_id, payload=payload)
 
 
 def build_plan_summary(db: Session, *, current_user: User, plan_id: int) -> dict[str, Any]:

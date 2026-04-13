@@ -17,6 +17,8 @@ os.environ['DATABASE_URL'] = f'sqlite:///{TEST_DB_PATH}'
 os.environ['AUTO_CREATE_SCHEMA'] = 'false'
 os.environ['JWT_SECRET'] = 'unitflow-test-secret-key-12345678901234567890'
 os.environ['ACCESS_TOKEN_EXPIRE_MINUTES'] = '120'
+os.environ['OPENAI_API_KEY'] = ''
+os.environ['OPENAI_STRATEGY_EXPLANATION_ENABLED'] = 'false'
 
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.seed import seed_demo_data  # noqa: E402

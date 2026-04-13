@@ -359,6 +359,12 @@ class StrategyRead(ORMModel):
     risk_factors: list[dict[str, Any]]
     instructor_explanation: str
     student_coaching: str
+    rationale_bullets: list[dict[str, Any]] = Field(default_factory=list)
+    risk_translation: list[dict[str, Any]] = Field(default_factory=list)
+    next_check_in_message: str | None = None
+    explanation_source: str = "deterministic_fallback"
+    explanation_model: str | None = None
+    explanation_generated_at: str | None = None
     generated_at: datetime
 
 
@@ -580,6 +586,12 @@ class StrategyOptionVariant(BaseModel):
     risk_factors: list[dict[str, Any]] = Field(default_factory=list)
     instructor_explanation: str
     student_coaching: str
+    rationale_bullets: list[dict[str, Any]] = Field(default_factory=list)
+    risk_translation: list[dict[str, Any]] = Field(default_factory=list)
+    next_check_in_message: str | None = None
+    explanation_source: str = "deterministic_fallback"
+    explanation_model: str | None = None
+    explanation_generated_at: str | None = None
     generated_at: datetime
     is_approved: bool = False
     is_student_visible: bool = False
