@@ -340,6 +340,47 @@ npm.cmd ci --registry=https://registry.npmjs.org --no-audit --no-fund
 - 요청 로그는 JSON line 형태로 출력되며 `LOG_LEVEL`로 조정한다.
 - LLM 호출은 선택 사항이며, API 키가 없어도 deterministic fallback 전략 설명이 동작한다.
 
+## 가장 빠른 배포 루트
+
+해커톤 데모용 공개 링크는 아래 조합이 가장 빠르다.
+
+- Backend: Render Web Service
+- Database: Render PostgreSQL
+- Frontend: Vercel
+
+레포에는 빠른 배포를 위한 설정이 포함되어 있다.
+
+- `render.yaml`: Render 백엔드와 PostgreSQL 생성
+- `apps/frontend/vercel.json`: Vercel SPA 라우팅 설정
+- `docs/deployment-fast-path.md`: 실제 클릭 순서와 환경변수 체크리스트
+
+배포 핵심 환경변수:
+
+```env
+# Render backend
+APP_ENV=production
+DATABASE_URL=<Render PostgreSQL URL>
+AUTO_CREATE_SCHEMA=false
+JWT_SECRET=<강한 랜덤 문자열>
+CORS_ORIGINS=https://<vercel-domain>
+CORS_ORIGIN_REGEX=
+OPENAI_API_KEY=
+
+# Vercel frontend
+VITE_API_BASE_URL=https://<render-api-domain>
+```
+
+전체 순서:
+
+1. GitHub `main`에 push한다.
+2. Render에서 Blueprint로 `render.yaml`을 배포한다.
+3. Render API의 `/health`가 `database: ok`인지 확인한다.
+4. Vercel에서 `apps/frontend`를 Root Directory로 배포한다.
+5. Vercel 도메인을 Render의 `CORS_ORIGINS`에 넣고 백엔드를 재배포한다.
+6. Render Shell에서 데모 계정이 필요하면 `python manage_db.py seed`를 한 번 실행한다.
+
+자세한 절차는 `docs/deployment-fast-path.md`를 따른다.
+
 ## 전략 설명 생성기
 
 UnitFlow AI의 전략 계산은 deterministic engine이 담당한다. LLM은 취약 유형, 목표대학 gap, 과목 우선순위, 주간 시간 배분, 단원 순서, 위험 요인을 바꾸지 않고 설명 문장만 생성한다.
