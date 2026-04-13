@@ -13,7 +13,7 @@ export function useAsyncData(loader, deps = []) {
       setData(next);
       return next;
     } catch (err) {
-      setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.');
+      setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했어.');
       throw err;
     } finally {
       setLoading(false);
