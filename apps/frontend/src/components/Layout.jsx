@@ -5,7 +5,7 @@ const linkClass = ({ isActive }) => `nav-link${isActive ? ' active' : ''}`;
 
 const ROLE_LABEL = {
   admin: '관리자',
-  instructor: '강사',
+  instructor: '강사 (코치)',
   student: '학생',
 };
 
@@ -16,6 +16,7 @@ const STUDENT_NAV = [
   { to: '/student/planner', label: '주간 플래너', mobileLabel: '플래너' },
   { to: '/student/growth', label: '성장 리포트', mobileLabel: '성장' },
   { to: '/student/simulator', label: '시뮬레이터', mobileLabel: '시뮬' },
+  { to: '/student/community-exams', label: '공유 시험', mobileLabel: '시험' },
 ];
 
 export default function Layout({ title, children, backTo, backLabel = '뒤로' }) {
@@ -29,7 +30,7 @@ export default function Layout({ title, children, backTo, backLabel = '뒤로' }
       <aside className="sidebar">
         <div className="sidebar-brand">
           <h1>UnitFlow AI</h1>
-          <p className="sidebar-tagline">AI 진단 + 목표대학 맞춤 전략</p>
+          <p className="sidebar-tagline">내 전략 · 내 실행 · 내 성장</p>
         </div>
 
         <nav className="nav-menu">
@@ -41,14 +42,16 @@ export default function Layout({ title, children, backTo, backLabel = '뒤로' }
             ))
           ) : (
             <>
+              <p className="nav-section-label">코칭</p>
               <NavLink className={linkClass} to="/instructor">
-                {isAdmin ? '운영 대시보드' : '학생 진단과 전략'}
+                {isAdmin ? '운영 대시보드' : '학생 현황'}
               </NavLink>
               <NavLink className={linkClass} to="/exams">
                 시험 관리
               </NavLink>
               {isAdmin ? (
                 <>
+                  <p className="nav-section-label" style={{ marginTop: '0.75rem' }}>운영</p>
                   <NavLink className={linkClass} to="/universities">
                     목표대학 정책
                   </NavLink>
@@ -64,7 +67,7 @@ export default function Layout({ title, children, backTo, backLabel = '뒤로' }
         <div className="sidebar-footer">
           <div className="user-card">
             <strong>{user?.full_name}</strong>
-            <span className="small">{user?.email}</span>
+            <span className="small muted">{user?.email}</span>
             <span className="role-badge">{ROLE_LABEL[role] || role}</span>
           </div>
           <button type="button" className="secondary-button sidebar-logout" onClick={logout}>

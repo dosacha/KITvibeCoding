@@ -209,12 +209,13 @@ export default function StudentDiagnosisPage() {
             ))}
           </div>
 
-          {/* 탭 1: 취약유형 */}
+          {/* 탭 1: 취약유형 — 5:7 (취약유형 요약 좁게, 시험흐름 넓게) */}
           {activeTab === '취약유형' ? (
-            <>
+            <div className="page-row r-diag">
+              {/* 좌: 취약 유형 요약 (좁은 컬럼) */}
               <SectionCard
                 title="내 취약 유형"
-                subtitle="점수 하나가 아니라 최근 시험 흐름, 단원 이해도, 학습 안정성을 함께 본 결과야."
+                subtitle="최근 시험 · 단원 이해도 · 안정성 종합"
               >
                 <div className="highlight-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -233,36 +234,36 @@ export default function StudentDiagnosisPage() {
                 </div>
               </SectionCard>
 
-              {/* 최근 시험 흐름 */}
-              <SectionCard title="최근 시험 흐름" subtitle="최근 결과가 어떤 방향으로 움직였는지 확인해.">
+              {/* 우: 최근 시험 흐름 — compact 테이블 */}
+              <SectionCard title="최근 시험 흐름" subtitle="점수가 어떻게 움직였는지 확인">
                 {(data.recent_trend || []).length > 0 ? (
                   <div className="table-wrapper">
-                    <table>
+                    <table className="dense-table diag-trend-table">
                       <thead>
                         <tr>
                           <th>시험</th>
                           <th>과목</th>
-                          <th>점수</th>
-                          <th>일자</th>
+                          <th style={{ textAlign: 'right' }}>점수</th>
+                          <th style={{ textAlign: 'right' }}>일자</th>
                         </tr>
                       </thead>
                       <tbody>
                         {(data.recent_trend || []).map((row, index) => (
                           <tr key={`${row.exam_name}-${index}`}>
-                            <td>{row.exam_name}</td>
+                            <td className="diag-trend-name">{row.exam_name}</td>
                             <td>{row.subject_name}</td>
-                            <td><strong>{formatNumber(row.score)}점</strong></td>
-                            <td className="muted small">{row.exam_date}</td>
+                            <td style={{ textAlign: 'right' }}><strong>{formatNumber(row.score)}점</strong></td>
+                            <td style={{ textAlign: 'right' }} className="muted small diag-trend-date">{row.exam_date}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 ) : (
-                  <p className="muted">아직 시험 결과가 없어. 강사에게 시험 결과 입력을 요청해봐.</p>
+                  <p className="muted small">아직 시험 결과가 없어. 강사에게 입력 요청해봐.</p>
                 )}
               </SectionCard>
-            </>
+            </div>
           ) : null}
 
           {/* 탭 2: 과목·단원 */}

@@ -1,143 +1,169 @@
-// FE-101: 학생 홈 v2
-// 로그인 후 10초 안에 "이번 주에 뭘 해야 하는지" 이해할 수 있도록 재구성.
-// 현재 전략 + 목표 gap + 다음 행동이 한 화면에 보인다.
+// 학생 홈 — /frontend/student/home API 기반
+// 오늘 핵심 할 일 편집 + LLM 추천 + 목표대학 gap + 전략 상태
 
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import ConfidenceChecklist from '../components/ConfidenceChecklist.jsx';
-import DirectionCard from '../components/DirectionCard.jsx';
-import GoalGapMap from '../components/GoalGapMap.jsx';
+import GoalEditorModal from '../components/GoalEditorModal.jsx';
 import Layout from '../components/Layout.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
+import TodayFocusEditor from '../components/TodayFocusEditor.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAsyncData } from '../hooks/useAsyncData.js';
 import { apiRequest } from '../lib/api.js';
-import { weaknessLabel } from '../lib/studentLabels.js';
+import { formatNumber } from '../lib/studentLabels.js';
 
-// 전략에서 오늘의 핵심 할 일 3개를 도출한다.
-function TodayTasks({ strategy, diagnosis }) {
-  const tasks = [];
+const APPROVAL_LABEL = {
+  student_draft: '내 초안',
+  submitted_for_review: '검토 요청 중',
+  coach_revision_requested: '강사 수정 요청',
+  coach_approved: '강사 승인',
+};
 
-  // 1순위: 단원 학습 순서 첫 항목
-  if (strategy?.plan?.unit_study_order?.length > 0) {
-    const top = strategy.plan.unit_study_order[0];
-    const label =
-      typeof top === 'string'
-        ? top
-        : [top.subject_name, top.unit_name || top.label].filter(Boolean).join(' · ');
-    if (label) tasks.push({ text: `${label} 집중 학습`, type: 'study' });
-  }
+const APPROVAL_STATUS = {
+  student_draft: 'draft',
+  submitted_for_review: 'pending_review',
+  coach_revision_requested: 'held',
+  coach_approved: 'approved',
+};
 
-  // 2순위: 취약 유형 보완 세션
-  if (diagnosis?.primary_weakness_type) {
-    tasks.push({
-      text: `${weaknessLabel(diagnosis.primary_weakness_type)} 보완 세션`,
-      type: 'weakness',
-    });
-  }
+const SOURCE_LABEL = {
+  student_workspace: '내 초안',
+  coach_approved: '강사 승인본',
+  ai_basic: 'AI 기본안',
+  ai_conservative: 'AI 보수안',
+};
 
-  // 3순위: 다음 점검일 준비
-  if (strategy?.plan?.next_check_in?.date) {
-    tasks.push({
-      text: `점검일(${strategy.plan.next_check_in.date}) 준비 — 진도 체크`,
-      type: 'checkin',
-    });
-  }
-
-  if (tasks.length === 0) {
+// 수시/정시 방향 카드
+function AdmissionDirectionCard({ direction }) {
+  if (!direction) {
     return (
-      <p className="muted">
-        전략이 승인되면 오늘의 할 일이 여기에 표시됩니다.{' '}
-        <Link to="/student/strategy-workspace">전략 설계실 →</Link>
+      <p className="muted small">
+        진단을 완료하면 수시·정시 방향을 분석해줄게.{' '}
+        <Link to="/student/diagnosis">진단하러 가기 →</Link>
       </p>
     );
   }
 
-  return (
-    <ol className="today-tasks">
-      {tasks.slice(0, 3).map((task, i) => (
-        <li key={i} className={`today-task-item today-task-${task.type}`}>
-          <span className="today-task-num">{i + 1}</span>
-          <span>{task.text}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-// 이번 주 전략 요약 — 승인된 전략 기반
-function WeeklySummary({ strategy, reviewNotice }) {
-  if (!strategy) {
-    return (
-      <p className="muted">
-        {reviewNotice || '강사가 전략을 검토 중입니다. 승인 후 이 화면에서 확인할 수 있습니다.'}
-        {' '}
-        <Link to="/student/strategy-workspace">전략 설계실 →</Link>
-      </p>
-    );
-  }
-
-  const plan = strategy.plan;
-  const alloc = plan?.weekly_time_allocation;
-  const checkIn = plan?.next_check_in;
+  const { recommended, reason, susi_ratio, jeongsi_ratio } = direction;
 
   return (
     <div className="stack-gap">
-      {strategy.summary ? (
-        <p style={{ lineHeight: 1.65, margin: 0 }}>{strategy.summary}</p>
-      ) : null}
-
-      <div className="split-grid">
-        {/* 주간 배분 */}
-        {Array.isArray(alloc) && alloc.length > 0 ? (
-          <div>
-            <p className="section-micro-label">주간 배분</p>
-            <ul className="bullet-list">
-              {alloc.slice(0, 4).map((item, i) => (
-                <li key={i}>
-                  {typeof item === 'string'
-                    ? item
-                    : `${item.subject_name || '과목'}: ${item.hours != null ? `${item.hours}시간` : '-'}${item.focus ? ` · ${item.focus}` : ''}`}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        {/* 다음 점검 일정 */}
-        {checkIn ? (
-          <div>
-            <p className="section-micro-label">다음 점검 일정</p>
-            <p style={{ margin: 0, fontWeight: 600 }}>
-              {checkIn.date || '미정'}
-              {checkIn.days != null ? (
-                <span className="muted small" style={{ fontWeight: 400 }}>
-                  {' '}({checkIn.days}일 후)
-                </span>
-              ) : null}
-            </p>
-            {checkIn.reason || checkIn.note ? (
-              <p className="muted small" style={{ margin: '0.2rem 0 0' }}>
-                {checkIn.reason || checkIn.note}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+      <div className="direction-highlight">
+        <span className="direction-tag">
+          {recommended === 'susi' ? '수시 우선' : recommended === 'jeongsi' ? '정시 우선' : '균형 전략'}
+        </span>
+        {reason ? <p className="muted small" style={{ margin: '0.3rem 0 0' }}>{reason}</p> : null}
       </div>
-
-      {/* 강사 코칭 메시지 */}
-      {strategy.student_coaching || plan?.student_message ? (
-        <div className="info-box">
-          <strong>강사 코칭</strong>
-          <p style={{ marginTop: '0.3rem', marginBottom: 0 }}>
-            {strategy.student_coaching || plan.student_message}
-          </p>
+      {(susi_ratio != null || jeongsi_ratio != null) ? (
+        <div className="direction-ratio-row">
+          <div className="direction-ratio-item">
+            <span className="muted small">수시</span>
+            <strong>{susi_ratio != null ? `${Math.round(susi_ratio * 100)}%` : '—'}</strong>
+          </div>
+          <div className="direction-ratio-sep">vs</div>
+          <div className="direction-ratio-item">
+            <span className="muted small">정시</span>
+            <strong>{jeongsi_ratio != null ? `${Math.round(jeongsi_ratio * 100)}%` : '—'}</strong>
+          </div>
         </div>
       ) : null}
+    </div>
+  );
+}
 
-      <div className="weekly-summary-actions">
+// 목표대학 gap 카드 (inline)
+function GoalGapCard({ goalGap, onEditGoal }) {
+  if (!goalGap) {
+    return (
+      <div className="stack-gap">
+        <p className="muted small">목표대학을 설정하면 gap을 분석해줄게.</p>
+        <button type="button" className="secondary-button compact" onClick={onEditGoal}>
+          목표대학 설정하기
+        </button>
+      </div>
+    );
+  }
+
+  const gaps = Array.isArray(goalGap) ? goalGap : [goalGap];
+
+  return (
+    <div className="stack-gap">
+      {gaps.slice(0, 3).map((g, i) => {
+        const totalGap = g.total_gap ?? g.gap ?? 0;
+        const gapAbs = Math.abs(totalGap);
+        const isPositive = totalGap <= 0; // gap이 0 이하면 초과달성
+
+        return (
+          <div key={i} className="goal-gap-row">
+            <div className="goal-gap-info">
+              <strong>{g.university_name || g.goal_label || `목표 ${i + 1}`}</strong>
+              {g.admission_type ? <span className="muted small"> · {g.admission_type}</span> : null}
+            </div>
+            <div className={`goal-gap-value${isPositive ? ' positive' : ' negative'}`}>
+              {isPositive ? '목표 달성권' : `${formatNumber(gapAbs, 1)}점 부족`}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button type="button" className="secondary-button compact" onClick={onEditGoal}>
+          목표 변경
+        </button>
+        <Link to="/student/simulator" className="secondary-button compact">
+          시뮬레이션 해보기 →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// 현재 전략 상태 카드
+function CurrentStrategyCard({ strategy, coachApproved }) {
+  if (!strategy && !coachApproved) {
+    return (
+      <p className="muted small">
+        아직 전략이 없어.{' '}
+        <Link to="/student/strategy-workspace">전략 설계실 →</Link>
+      </p>
+    );
+  }
+
+  const s = strategy || {};
+  const approvalStatus = s.approval_status;
+  const source = s.source;
+
+  return (
+    <div className="stack-gap">
+      <div className="current-strategy-header">
+        <div>
+          <span className="muted small">{SOURCE_LABEL[source] || source || '전략'}</span>
+          {approvalStatus ? (
+            <StatusBadge
+              status={APPROVAL_STATUS[approvalStatus] || approvalStatus}
+              label={APPROVAL_LABEL[approvalStatus] || approvalStatus}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      {s.summary ? (
+        <p style={{ margin: 0, lineHeight: 1.6 }}>{s.summary}</p>
+      ) : null}
+
+      {coachApproved && coachApproved.approved_at ? (
+        <p className="muted small" style={{ margin: 0 }}>
+          강사 승인:{' '}
+          {new Date(coachApproved.approved_at).toLocaleDateString('ko-KR', {
+            month: 'short',
+            day: 'numeric',
+          })}
+        </p>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <Link to="/student/strategy-workspace" className="secondary-button compact">
-          전략 상세 보기
+          전략 설계실 →
         </Link>
         <Link to="/student/planner" className="secondary-button compact">
           주간 플래너 →
@@ -147,29 +173,26 @@ function WeeklySummary({ strategy, reviewNotice }) {
   );
 }
 
-// 성장 한 줄 요약 — growth API가 없으면 diagnosis 기반으로 간단히 표시
-function GrowthOneLiner({ growth, diagnosis }) {
-  if (growth?.summary) {
-    return <p className="growth-one-liner">{growth.summary}</p>;
-  }
-  if (diagnosis?.primary_weakness_type) {
-    const label = weaknessLabel(diagnosis.primary_weakness_type);
-    return (
-      <p className="growth-one-liner muted">
-        현재 집중 개선 영역: <strong>{label}</strong>
-        {' '}— 꾸준히 이어가면 다음 점검에서 변화를 확인할 수 있습니다.
-      </p>
-    );
-  }
+// 저신뢰 보완 액션 목록
+function LowConfidenceActions({ actions = [] }) {
+  if (!actions.length) return null;
   return (
-    <p className="muted">성장 데이터가 쌓이면 여기에 표시됩니다.</p>
+    <ul className="bullet-list">
+      {actions.map((action, i) => (
+        <li key={i}>
+          {typeof action === 'string' ? action : action.label || action.text || JSON.stringify(action)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
 export default function StudentDashboardPage() {
   const { user, token } = useAuth();
-  const { data, loading, error } = useAsyncData(
-    async () => (await apiRequest('/frontend/dashboard/student', { token })).data,
+  const [showGoalEditor, setShowGoalEditor] = useState(false);
+
+  const { data, loading, error, reload } = useAsyncData(
+    () => apiRequest('/frontend/student/home', { token }),
     [token]
   );
 
@@ -179,110 +202,102 @@ export default function StudentDashboardPage() {
     weekday: 'short',
   });
 
+  const strategy = data?.student_visible_strategy;
+  const approvalStatus = strategy?.approval_status;
+
   return (
     <Layout title="내 학습 홈">
-      {loading ? (
-        <div className="empty-state">맞춤 전략을 준비하는 중입니다...</div>
-      ) : null}
+      {loading ? <div className="empty-state">준비 중...</div> : null}
       {error ? <div className="error-box">{error}</div> : null}
 
       {data ? (
         <>
-          {/* 인사말 */}
+          {/* 인사말 — full width */}
           <div className="student-greeting">
             <div>
               <h3 className="greeting-name">
-                {user?.full_name ? `안녕하세요, ${user.full_name}님` : '안녕하세요'}
+                {user?.full_name ? `${user.full_name}님` : '안녕하세요'}
               </h3>
               <p className="greeting-date muted small">{today}</p>
             </div>
             <div className="greeting-status">
-              {data.approved_strategy ? (
-                <StatusBadge status="approved" label="전략 승인됨" />
+              {approvalStatus ? (
+                <StatusBadge
+                  status={APPROVAL_STATUS[approvalStatus] || approvalStatus}
+                  label={APPROVAL_LABEL[approvalStatus] || approvalStatus}
+                />
               ) : (
-                <StatusBadge status="pending_review" label="전략 검토 중" />
+                <StatusBadge status="draft" label="전략 초안" />
               )}
             </div>
           </div>
 
-          {/* 오늘의 핵심 할 일 */}
-          <SectionCard
-            title="오늘의 핵심 할 일"
-            subtitle="승인된 전략에서 도출한 오늘 집중 항목입니다."
-          >
-            <TodayTasks
-              strategy={data.approved_strategy}
-              diagnosis={data.diagnosis}
-            />
-          </SectionCard>
+          {/* Row 1: 오늘 할 일(넓게) + 지원 방향(좁게) */}
+          <div className="page-row r-7-5">
+            <SectionCard
+              title="오늘 핵심 할 일"
+              subtitle="직접 수정하거나 AI 추천 받기"
+            >
+              <TodayFocusEditor
+                items={data.today_focus_items || []}
+                token={token}
+                onSaved={reload}
+              />
+            </SectionCard>
 
-          {/* 수시·정시 방향성 */}
-          <SectionCard
-            title="수시·정시 방향"
-            subtitle="현재 성적과 목표를 바탕으로 분석한 방향입니다."
-          >
-            <DirectionCard direction={data.direction} />
-          </SectionCard>
+            <SectionCard
+              title="지원 방향"
+              subtitle="수시 / 정시 전략 확인"
+            >
+              <AdmissionDirectionCard direction={data.admission_direction} />
+            </SectionCard>
+          </div>
 
-          {/* 목표대학 gap 맵 */}
-          <SectionCard
-            title="목표대학 gap"
-            subtitle="목표대학까지 과목별로 얼마나 부족한지 확인하세요."
-            actions={
-              data.primary_goal ? (
-                <Link to="/student/diagnosis" className="secondary-button compact">
-                  자세히 보기
-                </Link>
-              ) : null
-            }
-          >
-            <GoalGapMap
-              primaryGoal={data.primary_goal}
-              weakSubjects={data.diagnosis?.weak_subjects}
-              goalGaps={data.goal_gaps}
-            />
-          </SectionCard>
+          {/* Row 2: 목표대학 gap(넓게) + 현재 전략(좁게) */}
+          <div className="page-row r-7-5">
+            <SectionCard
+              title="목표 대학까지 거리"
+              subtitle="gap이 줄수록 목표에 가까워짐"
+            >
+              <GoalGapCard
+                goalGap={data.goal_gap}
+                onEditGoal={() => setShowGoalEditor(true)}
+              />
+            </SectionCard>
 
-          {/* 이번 주 전략 요약 */}
-          <SectionCard
-            title="이번 주 전략"
-            subtitle="강사가 승인한 주간 학습 전략입니다."
-          >
-            <WeeklySummary
-              strategy={data.approved_strategy}
-              reviewNotice={data.review_notice}
-            />
-          </SectionCard>
+            <SectionCard
+              title="현재 전략"
+              subtitle={
+                approvalStatus === 'coach_approved'
+                  ? '강사 승인본'
+                  : '내 초안 · 검토 요청 가능'
+              }
+            >
+              <CurrentStrategyCard
+                strategy={data.student_visible_strategy}
+                coachApproved={data.coach_approved_strategy}
+              />
+            </SectionCard>
+          </div>
 
-          {/* 최근 성장 한 줄 요약 */}
-          <SectionCard
-            title="최근 성장"
-            subtitle="나의 성장 흐름을 한눈에 확인하세요."
-            actions={
-              <Link to="/student/growth" className="secondary-button compact">
-                성장 리포트 →
-              </Link>
-            }
-          >
-            <GrowthOneLiner
-              growth={data.growth}
-              diagnosis={data.diagnosis}
-            />
-          </SectionCard>
-
-          {/* 저신뢰 진단 보완 CTA */}
-          {data.diagnosis?.low_confidence_flag ? (
+          {/* 저신뢰 CTA — full width (데이터 있을 때만) */}
+          {data.low_confidence_actions?.length > 0 ? (
             <SectionCard
               title="진단 정확도 높이기"
-              subtitle="아래 항목을 채우면 더 정확한 전략을 받을 수 있습니다."
+              subtitle="아래 항목을 채우면 더 정확한 전략이 나와"
             >
-              <ConfidenceChecklist
-                missingInputs={data.missing_inputs}
-                studentData={data}
-              />
+              <LowConfidenceActions actions={data.low_confidence_actions} />
             </SectionCard>
           ) : null}
         </>
+      ) : null}
+
+      {showGoalEditor ? (
+        <GoalEditorModal
+          token={token}
+          onClose={() => setShowGoalEditor(false)}
+          onSaved={reload}
+        />
       ) : null}
     </Layout>
   );

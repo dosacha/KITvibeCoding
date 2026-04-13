@@ -245,6 +245,10 @@ class StudentProfile(Base):
     strategies: Mapped[list["StudentStrategy"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     strategy_workspaces: Mapped[list["StudentStrategyWorkspace"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     weekly_plans: Mapped[list["WeeklyPlan"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
+    today_focus_items: Mapped[list["StudentTodayFocusItem"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
+    strategy_conversation_threads: Mapped[list["StrategyConversationThread"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
+    community_exams: Mapped[list["CommunityExam"]] = relationship(back_populates="created_by_student_profile", cascade="all, delete-orphan")
+    community_exam_submissions: Mapped[list["CommunityExamSubmission"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     admission_direction_snapshots: Mapped[list["AdmissionDirectionSnapshot"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     goal_readiness_snapshots: Mapped[list["GoalReadinessSnapshot"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
     mastery_current_records: Mapped[list["UnitMasteryCurrent"]] = relationship(back_populates="student_profile", cascade="all, delete-orphan")
@@ -839,6 +843,146 @@ class WeeklyPlanReflection(Base):
 
     plan: Mapped[WeeklyPlan] = relationship(back_populates="reflections", foreign_keys=[plan_id])
     student_profile: Mapped[StudentProfile | None] = relationship()
+
+
+class StudentTodayFocusItem(Base):
+    __tablename__ = "student_today_focus_items"
+    __table_args__ = (
+        Index("ix_today_focus_student_active", "student_profile_id", "is_active", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    reason: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(30), default="student")
+    is_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="today_focus_items")
+
+
+class StrategyConversationThread(Base):
+    __tablename__ = "strategy_conversation_threads"
+    __table_args__ = (
+        Index("ix_strategy_thread_student_active", "student_profile_id", "is_deleted", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    workspace_id: Mapped[int | None] = mapped_column(ForeignKey("student_strategy_workspaces.id"))
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str | None] = mapped_column(String(160))
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="strategy_conversation_threads")
+    workspace: Mapped[StudentStrategyWorkspace | None] = relationship()
+    created_by: Mapped[User | None] = relationship()
+    messages: Mapped[list["StrategyConversationMessage"]] = relationship(back_populates="thread", cascade="all, delete-orphan")
+
+
+class StrategyConversationMessage(Base):
+    __tablename__ = "strategy_conversation_messages"
+    __table_args__ = (
+        Index("ix_strategy_message_thread_created", "thread_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("strategy_conversation_threads.id"), index=True)
+    author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    role: Mapped[str] = mapped_column(String(30))
+    recipient: Mapped[str] = mapped_column(String(30), default="instructor")
+    content: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(30), default="user")
+    metadata_json: Mapped[dict] = mapped_column(JSONType, default=dict)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    thread: Mapped[StrategyConversationThread] = relationship(back_populates="messages")
+    author: Mapped[User | None] = relationship()
+
+
+class CommunityExam(Base):
+    __tablename__ = "community_exams"
+    __table_args__ = (
+        CheckConstraint("question_count >= 1", name="ck_community_exam_question_count_positive"),
+        CheckConstraint("choice_count >= 2", name="ck_community_exam_choice_count_min"),
+        Index("ix_community_exam_subject_created", "subject_name", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_by_student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180), index=True)
+    subject_name: Mapped[str] = mapped_column(String(80), index=True)
+    source_kind: Mapped[str] = mapped_column(String(40), default="other")
+    exam_date: Mapped[date | None] = mapped_column(Date)
+    question_count: Mapped[int] = mapped_column(Integer, default=1)
+    choice_count: Mapped[int] = mapped_column(Integer, default=5)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    created_by_student_profile: Mapped[StudentProfile] = relationship(back_populates="community_exams")
+    questions: Mapped[list["CommunityExamQuestion"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
+    submissions: Mapped[list["CommunityExamSubmission"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
+
+
+class CommunityExamQuestion(Base):
+    __tablename__ = "community_exam_questions"
+    __table_args__ = (
+        UniqueConstraint("exam_id", "question_number", name="uq_community_exam_question_number"),
+        CheckConstraint("question_number >= 1", name="ck_community_exam_question_number_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("community_exams.id"), index=True)
+    question_number: Mapped[int] = mapped_column(Integer)
+    answer_key: Mapped[str | None] = mapped_column(String(20))
+    metadata_json: Mapped[dict] = mapped_column(JSONType, default=dict)
+
+    exam: Mapped[CommunityExam] = relationship(back_populates="questions")
+
+
+class CommunityExamSubmission(Base):
+    __tablename__ = "community_exam_submissions"
+    __table_args__ = (
+        UniqueConstraint("exam_id", "student_profile_id", name="uq_community_exam_student_submission"),
+        Index("ix_community_submission_exam_created", "exam_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("community_exams.id"), index=True)
+    student_profile_id: Mapped[int] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    exam: Mapped[CommunityExam] = relationship(back_populates="submissions")
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="community_exam_submissions")
+    answers: Mapped[list["CommunityExamAnswer"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
+
+
+class CommunityExamAnswer(Base):
+    __tablename__ = "community_exam_answers"
+    __table_args__ = (
+        UniqueConstraint("submission_id", "question_number", name="uq_community_submission_question"),
+        CheckConstraint("question_number >= 1", name="ck_community_answer_question_number_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("community_exam_submissions.id"), index=True)
+    question_number: Mapped[int] = mapped_column(Integer)
+    selected_choice: Mapped[str] = mapped_column(String(20))
+    is_correct: Mapped[bool | None] = mapped_column(Boolean)
+
+    submission: Mapped[CommunityExamSubmission] = relationship(back_populates="answers")
 
 
 class AuditLog(Base):

@@ -113,7 +113,12 @@ python manage_db.py seed
 - CSV 업로드
 - 목표 대학 정책 관리
 - 학생별 전략 비교와 강사 승인
-- 학생에게 승인된 전략만 노출
+- 학생 자기주도 전략 draft와 coach-approved 전략 분리
+- 학생 오늘의 핵심 할 일 저장/추천
+- 학생 목표대학 직접 변경
+- 전략 설계실 학생/강사/AI 대화
+- 학생 공유 시험과 선지 선택률/정답률
+- 주간 플래너 재생성/회고 기반 조정안
 - 전략 설명 생성기: deterministic 전략 결과를 학생용 코칭 문장과 강사용 설명으로 변환
 - 감사 로그, 변경 이력, 재계산 작업 조회
 
@@ -129,25 +134,44 @@ python manage_db.py seed
 - `GET /frontend/dashboard/instructor`
 - `GET /frontend/dashboard/student`
 - `GET /frontend/student/home`
+- `PUT /frontend/student/home/today-focus`
+- `POST /frontend/student/home/today-focus/recommend`
 - `GET /frontend/student/diagnosis`
 - `GET /frontend/student/goal-gap`
 - `GET /frontend/student/admission-direction`
 - `GET /frontend/student/study-recipes`
 - `GET /frontend/student/strategy-workspace`
 - `POST /frontend/student/strategy-workspace`
+- `PUT /frontend/student/strategy-workspace`
+- `POST /frontend/student/strategy-workspace/recommend`
 - `POST /frontend/student/strategy-workspace/submit`
+- `GET /frontend/student/strategy-workspace/timeline`
+- `GET /frontend/student/strategy-chat`
+- `POST /frontend/student/strategy-chat/messages`
+- `DELETE /frontend/student/strategy-chat/messages/{message_id}`
+- `DELETE /frontend/student/strategy-chat/thread/{thread_id}`
 - `GET /frontend/student/planner`
 - `POST /frontend/student/planner/generate`
+- `POST /frontend/student/planner/{plan_id}/regenerate`
 - `POST /frontend/student/planner/items/{item_id}/check`
+- `PATCH /frontend/student/planner/items/{item_id}`
 - `POST /frontend/student/planner/{plan_id}/reflection`
 - `GET /frontend/student/growth`
 - `POST /frontend/student/simulations/goal-scenario`
 - `GET /frontend/student/onboarding`
 - `PUT /frontend/student/onboarding/profile`
+- `PUT /frontend/student/onboarding/goals`
 - `POST /frontend/student/onboarding/habits`
+- `GET /frontend/student/community-exams`
+- `POST /frontend/student/community-exams`
+- `GET /frontend/student/community-exams/{exam_id}`
+- `POST /frontend/student/community-exams/{exam_id}/submissions`
+- `GET /frontend/student/community-exams/{exam_id}/stats`
 - `GET /frontend/students/{student_id}`
 - `GET /frontend/students/{student_id}/strategy-options`
 - `GET /frontend/instructor/students/{student_id}/strategy-review`
+- `GET /frontend/instructor/students/{student_id}/strategy-chat`
+- `POST /frontend/instructor/students/{student_id}/strategy-chat/messages`
 - `POST /frontend/strategy-workspaces/{workspace_id}/reviews`
 - `GET /frontend/exams`
 - `GET /frontend/exams/{exam_id}`
@@ -186,7 +210,7 @@ python -m pytest tests
 현재 통과 기준:
 
 ```text
-42 passed
+49 passed
 ```
 
 프런트:

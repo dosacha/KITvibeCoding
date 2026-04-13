@@ -8,6 +8,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from ..models import (
+    CommunityExam,
+    CommunityExamAnswer,
+    CommunityExamQuestion,
+    CommunityExamSubmission,
     Exam,
     LearningHabitSnapshot,
     RecalculationTrigger,
@@ -19,7 +23,11 @@ from ..models import (
     StudentResult,
     StudentStrategy,
     StudentStrategyWorkspace,
+    StudentTodayFocusItem,
+    StrategyConversationMessage,
+    StrategyConversationThread,
     TargetUniversityProfile,
+    UniversityScorePolicy,
     User,
     WeeklyPlan,
     WeeklyPlanItem,
@@ -509,13 +517,23 @@ def _workspace_payload(workspace: StudentStrategyWorkspace | None) -> dict[str, 
     if workspace is None:
         return None
     status_value = _enum_value(workspace.status)
+    overrides = workspace.overrides or {}
+    plan_overrides = overrides.get("plan") if isinstance(overrides.get("plan"), dict) else overrides
     return {
         "id": workspace.id,
         "base_strategy_id": workspace.base_strategy_id,
         "status": status_value,
+        "approval_status": _approval_status_for_workspace(workspace),
         "status_label": WORKSPACE_STATUS_LABELS.get(status_value, status_value),
-        "overrides": workspace.overrides or {},
-        "merged_plan": _merge_strategy_with_overrides(workspace.base_strategy, workspace.overrides),
+        "overrides": overrides,
+        "merged_plan": _merge_strategy_with_overrides(workspace.base_strategy, overrides),
+        "weekly_total_hours": workspace.weekly_total_hours if workspace.weekly_total_hours is not None else plan_overrides.get("weekly_total_hours"),
+        "weekday_hours": workspace.weekday_hours if workspace.weekday_hours is not None else plan_overrides.get("weekday_hours"),
+        "weekend_hours": workspace.weekend_hours if workspace.weekend_hours is not None else plan_overrides.get("weekend_hours"),
+        "subject_allocations": plan_overrides.get("subject_allocations") or plan_overrides.get("weekly_time_allocation") or [],
+        "unit_priorities": plan_overrides.get("unit_priorities") or plan_overrides.get("unit_study_order") or [],
+        "study_method_overrides": plan_overrides.get("study_method_overrides") or plan_overrides.get("study_methods") or [],
+        "today_focus_items": plan_overrides.get("today_focus_items") or [],
         "student_note": workspace.student_note,
         "notes": workspace.student_note,
         "instructor_message": workspace.instructor_message,
@@ -523,6 +541,111 @@ def _workspace_payload(workspace: StudentStrategyWorkspace | None) -> dict[str, 
         "reviewed_at": workspace.reviewed_at,
         "updated_at": workspace.updated_at,
     }
+
+
+def _approval_status_for_workspace(workspace: StudentStrategyWorkspace | None) -> str:
+    if workspace is None:
+        return "student_draft"
+    status_value = _enum_value(workspace.status)
+    if status_value == StrategyWorkspaceStatus.SUBMITTED_FOR_REVIEW.value:
+        return "submitted_for_review"
+    if status_value in {StrategyWorkspaceStatus.REVISE_REQUESTED.value, "coach_revision_requested"}:
+        return "coach_revision_requested"
+    if status_value in {StrategyWorkspaceStatus.APPROVED.value, StrategyWorkspaceStatus.APPROVED_LINKED.value}:
+        return "coach_approved"
+    return "student_draft"
+
+
+def _student_visible_strategy(student: StudentProfile, workspace: StudentStrategyWorkspace | None) -> dict[str, Any] | None:
+    approved = _latest_approved_strategy(student)
+    basic = _latest_strategy(student, variant="basic")
+    conservative = _latest_strategy(student, variant="conservative")
+    if workspace and workspace.status != StrategyWorkspaceStatus.RESET:
+        base_strategy = workspace.base_strategy or basic or conservative or approved
+        merged_plan = _merge_strategy_with_overrides(base_strategy, workspace.overrides)
+        return {
+            "source": "student_workspace",
+            "approval_status": _approval_status_for_workspace(workspace),
+            "summary": workspace.student_note or (base_strategy.natural_language_summary if base_strategy else "내가 수정 중인 전략입니다."),
+            "structured_plan": merged_plan,
+            "workspace_id": workspace.id,
+            "base_strategy_id": base_strategy.id if base_strategy else None,
+        }
+    fallback = approved or basic or conservative
+    if fallback is None:
+        return None
+    source = "coach_approved" if fallback.status == StrategyStatus.APPROVED else f"ai_{fallback.variant}"
+    return {
+        "source": source,
+        "approval_status": "coach_approved" if fallback.status == StrategyStatus.APPROVED else "student_draft",
+        "summary": fallback.natural_language_summary,
+        "structured_plan": fallback.structured_plan or {},
+        "strategy_id": fallback.id,
+    }
+
+
+def _coach_approved_payload(student: StudentProfile) -> dict[str, Any] | None:
+    approved = _latest_approved_strategy(student)
+    if approved is None:
+        return None
+    return {
+        "id": approved.id,
+        "summary": approved.natural_language_summary,
+        "approved_at": approved.generated_at,
+        "structured_plan": approved.structured_plan or {},
+    }
+
+
+def _today_focus_items(db: Session, student_id: int) -> list[dict[str, Any]]:
+    items = (
+        db.query(StudentTodayFocusItem)
+        .filter(StudentTodayFocusItem.student_profile_id == student_id, StudentTodayFocusItem.is_active.is_(True))
+        .order_by(StudentTodayFocusItem.position.asc(), StudentTodayFocusItem.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "title": item.title,
+            "reason": item.reason,
+            "source": item.source,
+            "is_done": item.is_done,
+        }
+        for item in items
+    ]
+
+
+def _deterministic_focus_candidates(student: StudentProfile, diagnosis: dict[str, Any], goal_gap: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    top_subject = goal_gap.get("highest_leverage_subject")
+    if top_subject:
+        candidates.append(
+            {
+                "title": f"{top_subject.get('subject_name', '우선 과목')} gap 줄이기",
+                "reason": top_subject.get("reason") or "목표대학 gap 기준 우선순위가 높습니다.",
+                "source": "strategy_engine",
+                "is_done": False,
+            }
+        )
+    for unit in diagnosis.get("weak_units", [])[:2]:
+        candidates.append(
+            {
+                "title": f"{unit.get('unit_name', '취약 단원')} 오답 복습",
+                "reason": "최근 진단에서 먼저 보완할 단원으로 잡혔습니다.",
+                "source": "strategy_engine",
+                "is_done": False,
+            }
+        )
+    if not candidates:
+        candidates.append(
+            {
+                "title": "오늘 학습 기록 10분 정리",
+                "reason": "데이터가 쌓이면 전략 추천 정확도가 올라갑니다.",
+                "source": "strategy_engine",
+                "is_done": False,
+            }
+        )
+    return candidates[:limit]
 
 
 def build_workspace_timeline(db: Session, *, current_user: User) -> dict[str, Any]:
@@ -561,8 +684,12 @@ def build_strategy_workspace(db: Session, *, current_user: User) -> dict[str, An
         "ai_basic": _normalize_strategy(basic),
         "ai_conservative": _normalize_strategy(conservative),
         "approved": _normalize_strategy(approved),
+        "coach_approved_strategy": _normalize_strategy(approved),
+        "student_visible_strategy": _student_visible_strategy(student, workspace),
+        "approval_status": _approval_status_for_workspace(workspace),
         "student_draft": workspace_payload,
         "student_workspace": workspace_payload,
+        "diff": _build_workspace_diff(workspace),
         "review_status": review_status,
         "workspace_status": status_value,
         "review_status_label": WORKSPACE_STATUS_LABELS.get(_enum_value(workspace.status), "아직 작성 전") if workspace else "아직 작성 전",
@@ -608,6 +735,29 @@ def _validate_workspace_overrides(overrides: dict[str, Any]) -> None:
 def save_strategy_workspace(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
     student = _student_for_current_user(db, current_user)
     overrides = payload.get("overrides") or {}
+    direct_override_keys = {
+        "weekly_total_hours",
+        "weekday_hours",
+        "weekend_hours",
+        "subject_allocations",
+        "unit_priorities",
+        "study_method_overrides",
+        "today_focus_items",
+        "weekly_time_allocation",
+        "unit_study_order",
+        "study_methods",
+        "risk_factors",
+        "next_check_in",
+    }
+    direct_overrides = {key: payload[key] for key in direct_override_keys if key in payload}
+    if direct_overrides:
+        overrides = {**overrides, **direct_overrides}
+        if "subject_allocations" in direct_overrides and "weekly_time_allocation" not in overrides:
+            overrides["weekly_time_allocation"] = direct_overrides["subject_allocations"]
+        if "unit_priorities" in direct_overrides and "unit_study_order" not in overrides:
+            overrides["unit_study_order"] = direct_overrides["unit_priorities"]
+        if "study_method_overrides" in direct_overrides and "study_methods" not in overrides:
+            overrides["study_methods"] = direct_overrides["study_method_overrides"]
     if not isinstance(overrides, dict):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="전략 수정안은 객체 형태여야 해.")
     _validate_workspace_overrides(overrides)
@@ -629,6 +779,12 @@ def save_strategy_workspace(db: Session, *, current_user: User, payload: dict[st
         db.add(workspace)
     workspace.base_strategy_id = base_strategy.id if base_strategy else workspace.base_strategy_id
     workspace.overrides = overrides
+    if payload.get("weekly_total_hours") is not None:
+        workspace.weekly_total_hours = float(payload["weekly_total_hours"])
+    if payload.get("weekday_hours") is not None:
+        workspace.weekday_hours = float(payload["weekday_hours"])
+    if payload.get("weekend_hours") is not None:
+        workspace.weekend_hours = float(payload["weekend_hours"])
     workspace.student_note = payload.get("student_note")
     workspace.status = StrategyWorkspaceStatus.DRAFT
     db.flush()
@@ -651,7 +807,7 @@ def save_strategy_workspace(db: Session, *, current_user: User, payload: dict[st
     )
     db.commit()
     db.refresh(workspace)
-    return {"workspace": _workspace_payload(workspace)}
+    return {"workspace": _workspace_payload(workspace), "student_workspace": _workspace_payload(workspace), "diff": _build_workspace_diff(workspace)}
 
 
 def save_strategy_workspace_note(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1145,6 +1301,105 @@ def simulate_goal_scenario(db: Session, *, current_user: User, payload: dict[str
     }
 
 
+def build_home(db: Session, *, current_user: User) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    diagnosis = build_diagnosis(db, current_user=current_user)
+    goal_gap = build_goal_gap_for_student(db, student=student)
+    strategy_workspace = build_strategy_workspace(db, current_user=current_user)
+    workspace = _latest_workspace(db, student.id)
+    visible_strategy = _student_visible_strategy(student, workspace)
+    coach_approved = _coach_approved_payload(student)
+    growth = build_growth(db, current_user=current_user)
+    confidence = build_confidence_for_student(db, student=student)
+
+    focus_items = _today_focus_items(db, student.id)
+    if not focus_items:
+        focus_items = _deterministic_focus_candidates(student, diagnosis, goal_gap)
+
+    return {
+        "student": {
+            "id": student.id,
+            "name": student.user.full_name,
+            "grade_level": student.grade_level,
+            "weekly_available_hours": student.weekly_available_hours,
+        },
+        "today_actions": focus_items[:3],
+        "today_focus_items": focus_items[:3],
+        "student_visible_strategy": visible_strategy,
+        "coach_approved_strategy": coach_approved,
+        "approval_status": (visible_strategy or {}).get("approval_status", "student_draft"),
+        "weekly_strategy_summary": (visible_strategy or {}).get("summary") or "전략 초안을 만들고 오늘 실행할 일을 정해보세요.",
+        "primary_goal": goal_gap.get("primary_goal"),
+        "next_check_in": (visible_strategy or {}).get("structured_plan", {}).get("next_check_in"),
+        "recent_growth": growth.get("summary"),
+        "confidence": confidence,
+        "diagnosis": diagnosis,
+        "goal_gap": goal_gap,
+        "admission_direction": build_admission_direction(db, current_user=current_user),
+        "strategy_workspace": strategy_workspace,
+        "low_confidence_actions": confidence.get("actions", []),
+        "growth": growth,
+    }
+
+
+def simulate_goal_scenario(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    baseline = build_goal_gap(db, current_user=current_user)
+    raw_deltas = payload.get("subject_score_deltas") or payload.get("score_deltas") or {}
+    if isinstance(raw_deltas, list):
+        deltas = {item.get("subject_code"): float(item.get("delta") or 0) for item in raw_deltas if isinstance(item, dict)}
+    else:
+        deltas = {key: float(value or 0) for key, value in raw_deltas.items()}
+    hour_delta = float(payload.get("weekly_hours_delta") or 0)
+    base_hours = float(_student_for_current_user(db, current_user).weekly_available_hours or 0)
+    hours_after = max(0.0, base_hours + hour_delta)
+    scenario_subjects = []
+    changed_fields = []
+    for item in baseline.get("subject_gaps", []):
+        delta = float(deltas.get(item["subject_code"], 0))
+        current = max(0.0, min(100.0, float(item["current_score"]) + delta))
+        gap = round(max(float(item["target_score"]) - current, 0), 2)
+        weighted_gap = round(gap * float(item.get("weight") or 0), 3)
+        scenario_item = {**item, "current_score": current, "gap": gap, "simulated_score": current, "simulated_gap": gap, "weighted_gap": weighted_gap}
+        if delta:
+            scenario_item["applied_delta"] = delta
+            changed_fields.append(f"subject:{item['subject_code']}")
+        scenario_subjects.append(scenario_item)
+    priorities = sorted(scenario_subjects, key=lambda item: item.get("weighted_gap", item.get("gap", 0)), reverse=True)
+    total_weighted_gap = round(sum(item.get("weighted_gap", 0) for item in priorities), 2)
+    if hour_delta:
+        changed_fields.append("weekly_hours")
+    if payload.get("goal_id") or payload.get("target_university_override"):
+        changed_fields.append("goal")
+    risk_band = "low" if total_weighted_gap < 10 else "medium" if total_weighted_gap < 25 else "high"
+    total_gap = sum(max(item.get("weighted_gap", 0), 0.1) for item in priorities) or 1
+    weekly_time_allocation = [
+        {
+            "subject_code": item["subject_code"],
+            "subject_name": item["subject_name"],
+            "hours": round(hours_after * max(item.get("weighted_gap", 0), 0.1) / total_gap, 1),
+            "reason": "scenario gap priority",
+        }
+        for item in priorities[:5]
+    ]
+    scenario = {
+        "goal_gap": {**baseline, "subject_gaps": priorities, "highest_leverage_subject": priorities[0] if priorities else None, "gap": total_weighted_gap},
+        "risk_band": risk_band,
+        "subject_priorities": priorities[:5],
+        "weekly_time_allocation": weekly_time_allocation,
+        "summary": f"입력 변화 기준으로 총 weighted gap은 {total_weighted_gap}이고 위험 구간은 {risk_band}입니다.",
+        "changed_fields": sorted(set(changed_fields)),
+    }
+    return {
+        "inputs_echo": payload,
+        "baseline": baseline,
+        "scenario": scenario,
+        "base_goal_gap": baseline,
+        "updated_goal_gap": scenario["goal_gap"],
+        "changed_subject_priorities": priorities[:3],
+        "recommended_scenario_summary": scenario["summary"],
+    }
+
+
 def build_onboarding(db: Session, *, current_user: User) -> dict[str, Any]:
     student = _student_for_current_user(db, current_user)
     latest_habit = max(student.habits, key=lambda item: item.captured_at, default=None)
@@ -1337,3 +1592,516 @@ def review_strategy_workspace(db: Session, *, workspace_id: int, current_user: U
     )
     db.commit()
     return build_instructor_strategy_review(db, student_id=student.id, current_user=current_user)
+
+
+def save_today_focus(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="items must be a list")
+    for item in (
+        db.query(StudentTodayFocusItem)
+        .filter(StudentTodayFocusItem.student_profile_id == student.id, StudentTodayFocusItem.is_active.is_(True))
+        .all()
+    ):
+        item.is_active = False
+    for index, item in enumerate(items[:8], start=1):
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        db.add(
+            StudentTodayFocusItem(
+                student_profile_id=student.id,
+                title=title[:180],
+                reason=str(item.get("reason") or "").strip() or None,
+                source=str(item.get("source") or "student"),
+                is_done=bool(item.get("is_done", False)),
+                position=index,
+            )
+        )
+    record_audit(db, actor_user_id=current_user.id, entity_type="student_today_focus_items", entity_id=student.id, action="replace", payload={"count": len(items)})
+    db.commit()
+    return {"today_focus_items": _today_focus_items(db, student.id), "home": build_home(db, current_user=current_user)}
+
+
+def recommend_today_focus(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    diagnosis = build_diagnosis(db, current_user=current_user)
+    goal_gap = build_goal_gap_for_student(db, student=student)
+    recommended = _deterministic_focus_candidates(student, diagnosis, goal_gap)
+    mode = payload.get("mode", "replace")
+    if mode not in {"replace", "append"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="mode must be replace or append")
+    if mode == "append":
+        existing = _today_focus_items(db, student.id)
+        recommended = (existing + recommended)[:8]
+    save_today_focus(db, current_user=current_user, payload={"items": recommended})
+    return {
+        "items": _today_focus_items(db, student.id),
+        "explanation_source": "deterministic_fallback",
+        "explanation_model": None,
+        "fallback_reason": "llm_focus_recommendation_not_required_or_unavailable",
+    }
+
+
+def update_onboarding_goals(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    before_goal = _goal_payload(_primary_goal(student))
+    policy_id = payload.get("policy_id")
+    if policy_id is None:
+        university_name = payload.get("university_name")
+        admission_type = payload.get("admission_type")
+        query = db.query(UniversityScorePolicy)
+        if university_name:
+            query = query.filter(UniversityScorePolicy.university_name == university_name)
+        if admission_type:
+            query = query.filter(UniversityScorePolicy.admission_type == admission_type)
+        policy = query.order_by(UniversityScorePolicy.academic_year.desc(), UniversityScorePolicy.id.asc()).first()
+    else:
+        policy = db.get(UniversityScorePolicy, int(policy_id))
+    if policy is None:
+        policy = db.query(UniversityScorePolicy).order_by(UniversityScorePolicy.academic_year.desc(), UniversityScorePolicy.id.asc()).first()
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target university policy not found")
+    for goal in student.goals:
+        goal.is_active = False
+    goal = TargetUniversityProfile(
+        student_profile_id=student.id,
+        policy_id=policy.id,
+        target_department=payload.get("target_department") or payload.get("department") or "Undeclared",
+        priority_order=int(payload.get("priority_order") or 1),
+        is_active=True,
+        notes=payload.get("notes"),
+    )
+    db.add(goal)
+    student.last_self_updated_at = utc_now()
+    db.flush()
+    after_goal = _goal_payload(goal)
+    record_changes(db, actor_user_id=current_user.id, entity_type="student_profiles", entity_id=student.id, before={"primary_goal": before_goal}, after={"primary_goal": after_goal})
+    record_audit(db, actor_user_id=current_user.id, entity_type="target_university_profiles", entity_id=goal.id, action="student_goal_update", payload={"student_id": student.id, "policy_id": policy.id})
+    queue_recalculation(db, entity_type="student_profiles", entity_id=student.id, trigger=RecalculationTrigger.GOAL_CHANGED, scope={"student_ids": [student.id], "goal_id": goal.id}, requested_by_user_id=current_user.id)
+    db.commit()
+    db.expire_all()
+    return build_onboarding(db, current_user=current_user)
+
+
+def recommend_strategy_workspace(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    workspace = _latest_workspace(db, student.id)
+    base = (workspace.base_strategy if workspace else None) or _latest_strategy(student, variant="basic") or _latest_approved_strategy(student)
+    plan = dict(base.structured_plan or {}) if base else {}
+    mode = payload.get("mode", "full_strategy")
+    allocations = plan.get("weekly_time_allocation") or []
+    if payload.get("user_note"):
+        plan["student_constraints"] = {"note": payload["user_note"]}
+    if mode in {"weekly_plan", "full_strategy"} and allocations:
+        plan["weekly_time_allocation"] = [
+            {**item, "hours": round(float(item.get("hours") or 1) * 1.05, 1), "reason": item.get("reason") or "student requested recommendation"}
+            if isinstance(item, dict)
+            else item
+            for item in allocations
+        ]
+    if mode == "today_focus":
+        diagnosis = build_diagnosis(db, current_user=current_user)
+        goal_gap = build_goal_gap_for_student(db, student=student)
+        plan["today_focus_items"] = _deterministic_focus_candidates(student, diagnosis, goal_gap)
+    saved = save_strategy_workspace(db, current_user=current_user, payload={"base_strategy_id": base.id if base else None, "overrides": plan, "student_note": payload.get("user_note")})
+    return {
+        "suggested_workspace": saved["student_workspace"],
+        "diff": saved["diff"],
+        "explanation_source": "deterministic_fallback",
+        "explanation_model": None,
+    }
+
+
+def _ensure_strategy_thread(db: Session, *, student: StudentProfile, current_user: User, workspace_id: int | None = None) -> StrategyConversationThread:
+    query = db.query(StrategyConversationThread).filter(
+        StrategyConversationThread.student_profile_id == student.id,
+        StrategyConversationThread.is_deleted.is_(False),
+    )
+    if workspace_id is not None:
+        query = query.filter(StrategyConversationThread.workspace_id == workspace_id)
+    thread = query.order_by(StrategyConversationThread.updated_at.desc(), StrategyConversationThread.id.desc()).first()
+    if thread is None:
+        workspace = _latest_workspace(db, student.id)
+        thread = StrategyConversationThread(
+            student_profile_id=student.id,
+            workspace_id=workspace_id or (workspace.id if workspace else None),
+            created_by_user_id=current_user.id,
+            title="strategy-workspace",
+        )
+        db.add(thread)
+        db.flush()
+    return thread
+
+
+def _serialize_strategy_message(message: StrategyConversationMessage, current_user: User | None = None) -> dict[str, Any]:
+    role_label = {"student": "나", "instructor": "강사", "assistant": "AI 코치", "system": "시스템"}
+    if current_user and message.author_user_id and message.author_user_id != current_user.id and message.role == "student":
+        label = "학생"
+    else:
+        label = role_label.get(message.role, message.role)
+    return {
+        "id": message.id,
+        "role": message.role,
+        "author_label": label,
+        "recipient": message.recipient,
+        "content": message.content,
+        "created_at": message.created_at,
+        "deletable": current_user is not None and (message.author_user_id == current_user.id or current_user.role in {Role.ADMIN, Role.INSTRUCTOR}),
+        "source": message.source,
+        "metadata": message.metadata_json or {},
+    }
+
+
+def build_strategy_chat(db: Session, *, current_user: User, student_id: int | None = None) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user) if current_user.role == Role.STUDENT else get_student_for_user(db, student_id=student_id or 0, current_user=current_user)
+    thread = _ensure_strategy_thread(db, student=student, current_user=current_user)
+    messages = (
+        db.query(StrategyConversationMessage)
+        .filter(StrategyConversationMessage.thread_id == thread.id, StrategyConversationMessage.is_deleted.is_(False))
+        .order_by(StrategyConversationMessage.created_at.asc(), StrategyConversationMessage.id.asc())
+        .all()
+    )
+    return {"thread": {"id": thread.id, "workspace_id": thread.workspace_id}, "messages": [_serialize_strategy_message(item, current_user) for item in messages]}
+
+
+def post_strategy_chat_message(db: Session, *, current_user: User, payload: dict[str, Any], student_id: int | None = None) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user) if current_user.role == Role.STUDENT else get_student_for_user(db, student_id=student_id or 0, current_user=current_user)
+    recipient = payload.get("recipient", "instructor" if current_user.role != Role.STUDENT else "llm")
+    if recipient not in {"llm", "instructor", "both", "student"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="recipient must be llm, instructor, both, or student")
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="content is required")
+    thread = _ensure_strategy_thread(db, student=student, current_user=current_user, workspace_id=payload.get("workspace_id"))
+    role = "student" if current_user.role == Role.STUDENT else "instructor"
+    user_message = StrategyConversationMessage(thread_id=thread.id, author_user_id=current_user.id, role=role, recipient=recipient, content=content, source="user")
+    db.add(user_message)
+    appended = [user_message]
+    if recipient in {"llm", "both"}:
+        visible = _student_visible_strategy(student, _latest_workspace(db, student.id)) or {}
+        assistant_content = f"현재 전략 기준으로는 '{(visible.get('summary') or '우선순위 전략')}'를 유지하되, 오늘 실행할 항목을 작게 나누는 것이 좋습니다."
+        assistant = StrategyConversationMessage(
+            thread_id=thread.id,
+            author_user_id=None,
+            role="assistant",
+            recipient="student",
+            content=assistant_content,
+            source="deterministic_fallback",
+            metadata_json={"explanation_source": "deterministic_fallback", "explanation_model": None},
+        )
+        db.add(assistant)
+        appended.append(assistant)
+    thread.updated_at = utc_now()
+    db.flush()
+    record_audit(db, actor_user_id=current_user.id, entity_type="strategy_conversation_threads", entity_id=thread.id, action="message_create", payload={"student_id": student.id, "recipient": recipient})
+    db.commit()
+    return {"messages_appended": [_serialize_strategy_message(item, current_user) for item in appended], **build_strategy_chat(db, current_user=current_user, student_id=student.id)}
+
+
+def delete_strategy_chat_message(db: Session, *, current_user: User, message_id: int) -> dict[str, Any]:
+    message = db.get(StrategyConversationMessage, message_id)
+    if message is None or message.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="message not found")
+    thread = message.thread
+    if current_user.role == Role.STUDENT:
+        student = _student_for_current_user(db, current_user)
+        allowed = thread.student_profile_id == student.id and message.author_user_id == current_user.id
+    else:
+        get_student_for_user(db, student_id=thread.student_profile_id, current_user=current_user)
+        allowed = True
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="message cannot be deleted")
+    message.is_deleted = True
+    message.deleted_at = utc_now()
+    db.commit()
+    return {"deleted": True, "message_id": message_id}
+
+
+def delete_strategy_chat_thread(db: Session, *, current_user: User, thread_id: int) -> dict[str, Any]:
+    thread = db.get(StrategyConversationThread, thread_id)
+    if thread is None or thread.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="thread not found")
+    if current_user.role == Role.STUDENT:
+        student = _student_for_current_user(db, current_user)
+        if thread.student_profile_id != student.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="thread cannot be deleted")
+    else:
+        get_student_for_user(db, student_id=thread.student_profile_id, current_user=current_user)
+    thread.is_deleted = True
+    for message in thread.messages:
+        message.is_deleted = True
+        message.deleted_at = utc_now()
+    db.commit()
+    return {"deleted": True, "thread_id": thread_id}
+
+
+def _serialize_community_exam(exam: CommunityExam) -> dict[str, Any]:
+    return {
+        "id": exam.id,
+        "title": exam.title,
+        "subject_name": exam.subject_name,
+        "source_kind": exam.source_kind,
+        "exam_date": exam.exam_date,
+        "question_count": exam.question_count,
+        "choice_count": exam.choice_count,
+        "description": exam.description,
+        "created_by_student_profile_id": exam.created_by_student_profile_id,
+        "created_at": exam.created_at,
+        "submission_count": len(exam.submissions),
+    }
+
+
+def list_community_exams(db: Session, *, current_user: User, query: str | None = None) -> dict[str, Any]:
+    _student_for_current_user(db, current_user)
+    exam_query = db.query(CommunityExam).options(joinedload(CommunityExam.submissions)).filter(CommunityExam.is_public.is_(True), CommunityExam.is_deleted.is_(False))
+    if query:
+        like = f"%{query}%"
+        exam_query = exam_query.filter((CommunityExam.title.ilike(like)) | (CommunityExam.subject_name.ilike(like)))
+    exams = exam_query.order_by(CommunityExam.created_at.desc(), CommunityExam.id.desc()).limit(50).all()
+    return {"exams": [_serialize_community_exam(exam) for exam in exams]}
+
+
+def create_community_exam(db: Session, *, current_user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    question_count = int(payload.get("question_count") or len(payload.get("answer_key") or []) or 1)
+    choice_count = int(payload.get("choice_count") or 5)
+    exam_date = date.fromisoformat(payload["exam_date"]) if payload.get("exam_date") else None
+    exam = CommunityExam(
+        created_by_student_profile_id=student.id,
+        title=str(payload.get("title") or "Untitled exam")[:180],
+        subject_name=str(payload.get("subject_name") or "기타")[:80],
+        source_kind=str(payload.get("source_kind") or "other"),
+        exam_date=exam_date,
+        question_count=question_count,
+        choice_count=choice_count,
+        description=payload.get("description"),
+    )
+    db.add(exam)
+    db.flush()
+    answer_key = payload.get("answer_key") or []
+    for number in range(1, question_count + 1):
+        key = str(answer_key[number - 1]) if number - 1 < len(answer_key) and answer_key[number - 1] is not None else None
+        db.add(CommunityExamQuestion(exam_id=exam.id, question_number=number, answer_key=key))
+    record_audit(db, actor_user_id=current_user.id, entity_type="community_exams", entity_id=exam.id, action="student_create", payload={"student_id": student.id})
+    db.commit()
+    db.refresh(exam)
+    return {"exam": _serialize_community_exam(exam)}
+
+
+def get_community_exam(db: Session, *, current_user: User, exam_id: int) -> dict[str, Any]:
+    _student_for_current_user(db, current_user)
+    exam = db.query(CommunityExam).options(joinedload(CommunityExam.questions), joinedload(CommunityExam.submissions)).filter(CommunityExam.id == exam_id, CommunityExam.is_deleted.is_(False)).one_or_none()
+    if exam is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="community exam not found")
+    return {"exam": _serialize_community_exam(exam), "questions": [{"question_number": item.question_number, "answer_key": item.answer_key} for item in sorted(exam.questions, key=lambda item: item.question_number)]}
+
+
+def submit_community_exam(db: Session, *, current_user: User, exam_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    exam = db.query(CommunityExam).options(joinedload(CommunityExam.questions)).filter(CommunityExam.id == exam_id, CommunityExam.is_deleted.is_(False)).one_or_none()
+    if exam is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="community exam not found")
+    submission = db.query(CommunityExamSubmission).filter(CommunityExamSubmission.exam_id == exam.id, CommunityExamSubmission.student_profile_id == student.id).one_or_none()
+    if submission is None:
+        submission = CommunityExamSubmission(exam_id=exam.id, student_profile_id=student.id)
+        db.add(submission)
+        db.flush()
+    else:
+        for answer in list(submission.answers):
+            db.delete(answer)
+        db.flush()
+    key_map = {item.question_number: item.answer_key for item in exam.questions}
+    choices = payload.get("choices") or []
+    for choice in choices:
+        number = int(choice.get("question_number"))
+        selected = str(choice.get("selected_choice"))
+        answer_key = key_map.get(number)
+        db.add(CommunityExamAnswer(submission_id=submission.id, question_number=number, selected_choice=selected, is_correct=None if answer_key is None else selected == str(answer_key)))
+    submission.updated_at = utc_now()
+    record_audit(db, actor_user_id=current_user.id, entity_type="community_exam_submissions", entity_id=submission.id, action="student_submit", payload={"exam_id": exam.id})
+    db.commit()
+    return build_community_exam_stats(db, current_user=current_user, exam_id=exam.id)
+
+
+def build_community_exam_stats(db: Session, *, current_user: User, exam_id: int) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    exam = db.query(CommunityExam).options(joinedload(CommunityExam.questions), joinedload(CommunityExam.submissions).joinedload(CommunityExamSubmission.answers)).filter(CommunityExam.id == exam_id, CommunityExam.is_deleted.is_(False)).one_or_none()
+    if exam is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="community exam not found")
+    my_submission = next((item for item in exam.submissions if item.student_profile_id == student.id), None)
+    my_choices = {answer.question_number: answer.selected_choice for answer in my_submission.answers} if my_submission else {}
+    questions = []
+    for question in sorted(exam.questions, key=lambda item: item.question_number):
+        answers = [answer for submission in exam.submissions for answer in submission.answers if answer.question_number == question.question_number]
+        total = len(answers)
+        distribution = []
+        for index in range(1, exam.choice_count + 1):
+            choice = str(index)
+            count = sum(1 for answer in answers if answer.selected_choice == choice)
+            distribution.append({"choice": choice, "rate": round(count / total, 3) if total else 0.0, "count": count})
+        correct_count = sum(1 for answer in answers if answer.is_correct)
+        questions.append(
+            {
+                "question_number": question.question_number,
+                "answer_key": question.answer_key,
+                "submission_count": total,
+                "correct_rate": None if question.answer_key is None else round(correct_count / total, 3) if total else 0.0,
+                "choice_distribution": distribution,
+                "my_choice": my_choices.get(question.question_number),
+            }
+        )
+    return {"exam": _serialize_community_exam(exam), "questions": questions}
+
+
+def regenerate_weekly_plan(db: Session, *, current_user: User, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    plan = (
+        db.query(WeeklyPlan)
+        .options(joinedload(WeeklyPlan.items), joinedload(WeeklyPlan.reflections))
+        .filter(WeeklyPlan.id == plan_id, WeeklyPlan.student_profile_id == student.id)
+        .one_or_none()
+    )
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="weekly plan not found")
+    preserve_completed = bool(payload.get("preserve_completed", True))
+    completed_items = [item for item in plan.items if item.status == WeeklyPlanItemStatus.COMPLETED or item.is_checked]
+    open_items = [item for item in plan.items if item not in completed_items]
+    before_open_count = len(open_items)
+    before_minutes = sum(item.planned_minutes for item in open_items)
+    workspace = _latest_workspace(db, student.id)
+    strategy, plan_data, workspace_id = _plan_source(student, workspace)
+    allocations = plan_data.get("weekly_time_allocation") or []
+    units = plan_data.get("unit_study_order") or []
+    if not allocations:
+        allocations = [{"subject_code": "CUSTOM", "subject_name": "핵심 과목", "hours": max(student.weekly_available_hours, 6), "focus": "우선순위 복습"}]
+    for item in list(open_items):
+        db.delete(item)
+    db.flush()
+    generated_count = 0
+    rebalanced_minutes = 0
+    for index, allocation in enumerate(allocations):
+        if isinstance(allocation, str):
+            subject_name = allocation
+            subject_code = "CUSTOM"
+            hours = 1.0
+            focus = None
+        else:
+            subject_name = allocation.get("subject_name") or allocation.get("subject") or "핵심 과목"
+            subject_code = allocation.get("subject_code") or "CUSTOM"
+            hours = float(allocation.get("hours") or 1.0)
+            focus = allocation.get("focus") or allocation.get("reason")
+        unit = units[index % len(units)] if units else {}
+        planned_minutes = max(int(hours * 60), 20)
+        rebalanced_minutes += planned_minutes
+        db.add(
+            WeeklyPlanItem(
+                plan_id=plan.id,
+                subject_code=subject_code,
+                subject_name=_subject_label(subject_code, subject_name),
+                unit_id=unit.get("unit_id") if isinstance(unit, dict) else None,
+                unit_name=unit.get("unit_name") if isinstance(unit, dict) else None,
+                planned_minutes=planned_minutes,
+                title=f"{_subject_label(subject_code, subject_name)} 재배치 학습",
+                instruction=focus,
+                day_bucket=DAY_BUCKETS[(index + len(completed_items)) % len(DAY_BUCKETS)],
+                day_of_week=DAY_BUCKETS[(index + len(completed_items)) % len(DAY_BUCKETS)],
+                priority=len(completed_items) + index + 1,
+                priority_order=len(completed_items) + index + 1,
+                rollover_allowed=index < 3,
+            )
+        )
+        generated_count += 1
+    plan.source_strategy_id = strategy.id if strategy else plan.source_strategy_id
+    plan.workspace_id = workspace_id
+    plan.generation_source = payload.get("reason") or ("student_workspace" if workspace_id else "auto")
+    plan.planned_total_minutes = sum(item.planned_minutes for item in plan.items)
+    plan.completed_total_minutes = sum(item.completed_minutes for item in completed_items) if preserve_completed else 0
+    plan.completion_rate_cached = round(plan.completed_total_minutes / max(plan.planned_total_minutes, 1), 3)
+    plan.carry_over_summary_json = {
+        "reason": payload.get("reason", "manual"),
+        "before_open_items": before_open_count,
+        "after_open_items": generated_count,
+        "before_open_minutes": before_minutes,
+        "after_open_minutes": rebalanced_minutes,
+        "preserved_completed": preserve_completed,
+    }
+    record_audit(db, actor_user_id=current_user.id, entity_type="weekly_plans", entity_id=plan.id, action="regenerate", payload=plan.carry_over_summary_json)
+    db.commit()
+    serialized = build_planner(db, current_user=current_user, week_start=plan.week_start.isoformat())
+    return {
+        **serialized,
+        "regeneration_summary": {
+            "changed": generated_count != before_open_count or rebalanced_minutes != before_minutes,
+            "reason": payload.get("reason", "manual"),
+            "moved_items_count": before_open_count,
+            "rebalanced_minutes": abs(rebalanced_minutes - before_minutes),
+            "preserved_completed": preserve_completed,
+            "highlights": [
+                f"완료 항목 {len(completed_items)}개 보존",
+                f"미완료 항목 {before_open_count}개를 최신 전략 기준으로 재배치",
+            ],
+        },
+    }
+
+
+def patch_plan_item(db: Session, *, current_user: User, item_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    status_value = normalized.get("status")
+    if status_value == "completed":
+        normalized["checked"] = True
+    elif status_value in {"planned", "skipped", "rolled_over"}:
+        normalized["checked"] = False
+    return check_plan_item(db, current_user=current_user, item_id=item_id, payload=normalized)
+
+
+def save_plan_reflection(db: Session, *, current_user: User, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    student = _student_for_current_user(db, current_user)
+    plan = (
+        db.query(WeeklyPlan)
+        .options(joinedload(WeeklyPlan.items), joinedload(WeeklyPlan.reflections))
+        .filter(WeeklyPlan.id == plan_id, WeeklyPlan.student_profile_id == student.id)
+        .one_or_none()
+    )
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="weekly plan not found")
+    completed = sum(1 for item in plan.items if item.status == WeeklyPlanItemStatus.COMPLETED or item.is_checked)
+    total = max(len(plan.items), 1)
+    completion_rate = completed / total
+    blocker_text = payload.get("blocker_text") or payload.get("blocked") or payload.get("stuck_at")
+    failure_reason = payload.get("failure_reason") or payload.get("why_failed")
+    adjustment_note = payload.get("adjustment_note") or payload.get("next_adjustment") or payload.get("next_week_changes")
+    reflection = WeeklyPlanReflection(
+        plan_id=plan.id,
+        student_profile_id=student.id,
+        reflection_type=payload.get("reflection_type", "weekly"),
+        wins_text=payload.get("wins_text") or payload.get("good") or payload.get("went_well"),
+        blocker_text=blocker_text,
+        good=payload.get("good") or payload.get("went_well"),
+        blocked=blocker_text,
+        failure_reason=failure_reason,
+        adjustment_note=adjustment_note,
+        next_adjustment=adjustment_note,
+    )
+    db.add(reflection)
+    recommended_adjustments = []
+    if completion_rate < 0.6:
+        recommended_adjustments.append({"type": "reduce_scope", "detail": "완료율이 낮아 다음 주 계획량을 10~20% 줄이는 것을 권장합니다."})
+    if blocker_text:
+        recommended_adjustments.append({"type": "remove_blocker", "detail": f"막힌 지점: {blocker_text}"})
+    if failure_reason:
+        recommended_adjustments.append({"type": "change_method", "detail": f"실패 이유를 반영해 학습 방식을 조정하세요: {failure_reason}"})
+    suggested_regenerate = completion_rate < 0.7 or bool(blocker_text or failure_reason)
+    record_audit(db, actor_user_id=current_user.id, entity_type="weekly_plan_reflections", entity_id=plan.id, action="create", payload={"student_id": student.id, "suggested_regenerate": suggested_regenerate})
+    db.flush()
+    db.commit()
+    db.expire_all()
+    planner = build_planner(db, current_user=current_user, week_start=plan.week_start.isoformat())
+    return {
+        **planner,
+        "reflection_saved": True,
+        "recommended_adjustments": recommended_adjustments,
+        "suggested_regenerate": suggested_regenerate,
+        "updated_plan_summary": planner.get("plan", {}).get("summary", {}),
+    }

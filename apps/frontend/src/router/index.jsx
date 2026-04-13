@@ -4,6 +4,8 @@ import AuditPage from '../pages/AuditPage.jsx';
 import ExamsPage from '../pages/ExamsPage.jsx';
 import InstructorDashboardPage from '../pages/InstructorDashboardPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
+import StudentCommunityExamDetailPage from '../pages/StudentCommunityExamDetailPage.jsx';
+import StudentCommunityExamsPage from '../pages/StudentCommunityExamsPage.jsx';
 import StudentDashboardPage from '../pages/StudentDashboardPage.jsx';
 import StudentDetailPage from '../pages/StudentDetailPage.jsx';
 import StudentDiagnosisPage from '../pages/StudentDiagnosisPage.jsx';
@@ -24,94 +26,23 @@ function StaffRoute({ children }) {
 export const appRouter = createBrowserRouter([
   { path: '/', element: <Navigate to="/login" replace /> },
   { path: '/login', element: <LoginPage /> },
-  {
-    path: '/instructor',
-    element: (
-      <StaffRoute>
-        <InstructorDashboardPage />
-      </StaffRoute>
-    ),
-  },
-  {
-    path: '/students/:studentId',
-    element: (
-      <StaffRoute>
-        <StudentDetailPage />
-      </StaffRoute>
-    ),
-  },
-  {
-    path: '/exams',
-    element: (
-      <StaffRoute>
-        <ExamsPage />
-      </StaffRoute>
-    ),
-  },
-  {
-    path: '/universities',
-    element: (
-      <StaffRoute>
-        <UniversityPoliciesPage />
-      </StaffRoute>
-    ),
-  },
-  {
-    path: '/audit',
-    element: (
-      <StaffRoute>
-        <AuditPage />
-      </StaffRoute>
-    ),
-  },
-  {
-    path: '/student',
-    element: (
-      <StudentRoute>
-        <StudentDashboardPage />
-      </StudentRoute>
-    ),
-  },
-  {
-    path: '/student/diagnosis',
-    element: (
-      <StudentRoute>
-        <StudentDiagnosisPage />
-      </StudentRoute>
-    ),
-  },
-  {
-    path: '/student/strategy-workspace',
-    element: (
-      <StudentRoute>
-        <StudentStrategyWorkspacePage />
-      </StudentRoute>
-    ),
-  },
-  {
-    path: '/student/planner',
-    element: (
-      <StudentRoute>
-        <StudentPlannerPage />
-      </StudentRoute>
-    ),
-  },
-  {
-    path: '/student/growth',
-    element: (
-      <StudentRoute>
-        <StudentGrowthPage />
-      </StudentRoute>
-    ),
-  },
-  {
-    path: '/student/simulator',
-    element: (
-      <StudentRoute>
-        <StudentSimulatorPage />
-      </StudentRoute>
-    ),
-  },
-  // 존재하지 않는 경로 → 로그인 페이지로
+
+  // ── Staff ──
+  { path: '/instructor', element: <StaffRoute><InstructorDashboardPage /></StaffRoute> },
+  { path: '/students/:studentId', element: <StaffRoute><StudentDetailPage /></StaffRoute> },
+  { path: '/exams', element: <StaffRoute><ExamsPage /></StaffRoute> },
+  { path: '/universities', element: <StaffRoute><UniversityPoliciesPage /></StaffRoute> },
+  { path: '/audit', element: <StaffRoute><AuditPage /></StaffRoute> },
+
+  // ── Student ──
+  { path: '/student', element: <StudentRoute><StudentDashboardPage /></StudentRoute> },
+  { path: '/student/diagnosis', element: <StudentRoute><StudentDiagnosisPage /></StudentRoute> },
+  { path: '/student/strategy-workspace', element: <StudentRoute><StudentStrategyWorkspacePage /></StudentRoute> },
+  { path: '/student/planner', element: <StudentRoute><StudentPlannerPage /></StudentRoute> },
+  { path: '/student/growth', element: <StudentRoute><StudentGrowthPage /></StudentRoute> },
+  { path: '/student/simulator', element: <StudentRoute><StudentSimulatorPage /></StudentRoute> },
+  { path: '/student/community-exams', element: <StudentRoute><StudentCommunityExamsPage /></StudentRoute> },
+  { path: '/student/community-exams/:examId', element: <StudentRoute><StudentCommunityExamDetailPage /></StudentRoute> },
+
   { path: '*', element: <Navigate to="/" replace /> },
 ]);

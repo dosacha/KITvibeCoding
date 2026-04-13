@@ -1,5 +1,4 @@
-// FE-601~604: 시뮬레이터
-// 점수 변화 입력 → 현실/도전/안정 시나리오 비교, 변경 전후 gap 시각화.
+// What-if 시뮬레이션 — baseline vs scenario 나란히 비교
 
 import { useState } from 'react';
 import Layout from '../components/Layout.jsx';
@@ -9,103 +8,195 @@ import { useFlashMessage } from '../hooks/useFlashMessage.js';
 import { apiRequest } from '../lib/api.js';
 import { formatNumber } from '../lib/studentLabels.js';
 
-const SUBJECT_INPUTS = [
-  { key: 'KOR', label: '국어' },
-  { key: 'MATH', label: '수학' },
-  { key: 'ENG', label: '영어' },
+const SUBJECTS = [
+  { code: 'KOR', label: '국어' },
+  { code: 'MATH', label: '수학' },
+  { code: 'ENG', label: '영어' },
 ];
 
-const SCENARIO_META = {
-  current: { cls: 'scenario-current', emoji: '📌', label: '현재 기준' },
-  challenge: { cls: 'scenario-challenge', emoji: '🚀', label: '도전 시나리오' },
-  safe: { cls: 'scenario-safe', emoji: '🛡️', label: '안정 시나리오' },
+const DIRECTION_OPTS = [
+  { value: '', label: '방향 미지정' },
+  { value: 'susi', label: '수시 가정' },
+  { value: 'jeongsi', label: '정시 가정' },
+  { value: 'balanced', label: '균형' },
+];
+
+const RISK_COLOR = {
+  high: '#dc2626',
+  medium: '#d97706',
+  low: '#16a34a',
+  very_low: '#0284c7',
 };
 
-// 시나리오 카드 3개 비교
-function ScenarioCompareGrid({ scenarios }) {
-  if (!scenarios?.length) return null;
-
-  return (
-    <div className="scenario-compare-grid">
-      {scenarios.map((sc) => {
-        const meta = SCENARIO_META[sc.type] || { cls: '', emoji: '—', label: sc.label || sc.type };
-        return (
-          <div key={sc.type} className={`scenario-card ${meta.cls}`}>
-            <p className="scenario-card-label">{meta.emoji} {meta.label || sc.label}</p>
-            <div className="scenario-gap-display">
-              {formatNumber(sc.total_gap ?? sc.gap, 1)}점
-            </div>
-            <p className="muted small" style={{ margin: 0 }}>목표대학 gap</p>
-            {sc.weekly_hours != null ? (
-              <p className="muted small" style={{ margin: 0 }}>
-                주 {formatNumber(sc.weekly_hours)}시간 필요
-              </p>
-            ) : null}
-            {sc.success_probability != null ? (
-              <p className="muted small" style={{ margin: 0 }}>
-                달성 가능성 {formatNumber(sc.success_probability * 100, 0)}%
-              </p>
-            ) : null}
-            {sc.summary ? (
-              <p className="muted small" style={{ margin: '0.35rem 0 0', borderTop: '1px solid #e5ebf3', paddingTop: '0.35rem' }}>
-                {sc.summary}
-              </p>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
+// 변경된 필드 하이라이트 배지
+function ChangedBadge({ changed }) {
+  if (!changed) return null;
+  return <span className="sim-changed-badge">변동</span>;
 }
 
-// 변경 전/후 gap 시각화
-function BeforeAfterGap({ before, after }) {
-  if (!before && !after) return null;
+// baseline / scenario 나란히 비교 패널
+function SimComparePanel({ baseline, scenario }) {
+  if (!baseline && !scenario) return null;
+
+  const changedFields = new Set(scenario?.changed_fields || []);
+
+  const baseGap = baseline?.goal_gap?.total_gap ?? baseline?.total_gap;
+  const scenGap = scenario?.goal_gap?.total_gap ?? scenario?.total_gap;
+  const gapDiff = baseGap != null && scenGap != null ? scenGap - baseGap : null;
 
   return (
-    <div className="simulator-before-after">
-      <div className="before-box">
-        <p className="ba-label">현재 gap</p>
-        <p className="ba-value">{formatNumber(before?.total_gap ?? 0, 1)}점</p>
-        {before?.band ? <p className="ba-band muted small">{before.band}</p> : null}
+    <div className="sim-compare-root">
+      {/* gap 비교 */}
+      <div className="sim-compare-row sim-gap-compare">
+        <div className="sim-col sim-col-base">
+          <p className="sim-col-label">현재 기준</p>
+          <div className="sim-big-val">
+            {baseGap != null ? `${formatNumber(Math.abs(baseGap), 1)}점 부족` : '—'}
+          </div>
+          <p className="muted small">{baseline?.goal_gap?.band || baseline?.risk_band || ''}</p>
+        </div>
+
+        <div className="sim-col-arrow">
+          {gapDiff != null ? (
+            <span className={`sim-gap-delta${gapDiff < 0 ? ' improved' : gapDiff > 0 ? ' worsened' : ''}`}>
+              {gapDiff < 0 ? `▼ ${formatNumber(Math.abs(gapDiff), 1)}점` : gapDiff > 0 ? `▲ ${formatNumber(gapDiff, 1)}점` : '변동 없음'}
+            </span>
+          ) : '→'}
+        </div>
+
+        <div className="sim-col sim-col-scenario">
+          <p className="sim-col-label">
+            변경 후
+            <ChangedBadge changed={changedFields.has('goal_gap')} />
+          </p>
+          <div className="sim-big-val">
+            {scenGap != null ? `${formatNumber(Math.abs(scenGap), 1)}점 부족` : '—'}
+          </div>
+          <p className="muted small" style={{ color: scenario?.risk_band ? RISK_COLOR[scenario.risk_band] || '#334155' : undefined }}>
+            {scenario?.goal_gap?.band || scenario?.risk_band || ''}
+          </p>
+        </div>
       </div>
-      <div className="arrow-icon">→</div>
-      <div className="after-box">
-        <p className="ba-label">변경 후 gap</p>
-        <p className="ba-value">{formatNumber(after?.total_gap ?? 0, 1)}점</p>
-        {after?.band ? <p className="ba-band muted small">{after.band}</p> : null}
-      </div>
+
+      {/* 과목 우선순위 */}
+      {(baseline?.subject_priorities?.length > 0 || scenario?.subject_priorities?.length > 0) ? (
+        <div className="sim-section">
+          <p className="section-micro-label">
+            과목 우선순위
+            <ChangedBadge changed={changedFields.has('subject_priorities')} />
+          </p>
+          <div className="sim-compare-row">
+            <div className="sim-col">
+              {(baseline?.subject_priorities || []).map((s, i) => (
+                <div key={i} className="sim-priority-row">
+                  <span className="sim-rank">{i + 1}</span>
+                  <span>{s.subject_name || s.subject_code}</span>
+                  {s.gap != null ? <span className="muted small">{formatNumber(s.gap, 1)}pt</span> : null}
+                </div>
+              ))}
+            </div>
+            <div className="sim-col-arrow">→</div>
+            <div className="sim-col">
+              {(scenario?.subject_priorities || []).map((s, i) => {
+                const baseIdx = (baseline?.subject_priorities || []).findIndex(
+                  (b) => b.subject_code === s.subject_code || b.subject_name === s.subject_name
+                );
+                const moved = baseIdx !== -1 && baseIdx !== i;
+                return (
+                  <div key={i} className={`sim-priority-row${moved ? ' sim-moved' : ''}`}>
+                    <span className="sim-rank">{i + 1}</span>
+                    <span>{s.subject_name || s.subject_code}</span>
+                    {s.gap != null ? <span className="muted small">{formatNumber(s.gap, 1)}pt</span> : null}
+                    {moved ? <span className="sim-changed-badge">이동</span> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 주간 배분 */}
+      {(baseline?.weekly_time_allocation?.length > 0 || scenario?.weekly_time_allocation?.length > 0) ? (
+        <div className="sim-section">
+          <p className="section-micro-label">
+            주간 시간 배분
+            <ChangedBadge changed={changedFields.has('weekly_time_allocation')} />
+          </p>
+          <div className="sim-compare-row">
+            <div className="sim-col">
+              {(baseline?.weekly_time_allocation || []).map((a, i) => (
+                <div key={i} className="sim-alloc-row">
+                  <span>{a.subject_name || a.label}</span>
+                  <span className="muted small">{formatNumber(a.hours)}시간</span>
+                </div>
+              ))}
+            </div>
+            <div className="sim-col-arrow">→</div>
+            <div className="sim-col">
+              {(scenario?.weekly_time_allocation || []).map((a, i) => {
+                const base = (baseline?.weekly_time_allocation || []).find(
+                  (b) => b.subject_name === a.subject_name || b.label === a.label
+                );
+                const diff = base != null ? a.hours - base.hours : null;
+                return (
+                  <div key={i} className={`sim-alloc-row${diff && diff !== 0 ? ' sim-moved' : ''}`}>
+                    <span>{a.subject_name || a.label}</span>
+                    <span className="muted small">
+                      {formatNumber(a.hours)}시간
+                      {diff != null && diff !== 0 ? (
+                        <span className={diff > 0 ? 'sim-up' : 'sim-down'}>
+                          {' '}{diff > 0 ? `+${formatNumber(diff, 1)}` : formatNumber(diff, 1)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 시나리오 요약 */}
+      {scenario?.summary ? (
+        <div className="sim-summary-box">
+          <p style={{ margin: 0 }}>{scenario.summary}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export default function StudentSimulatorPage() {
   const { token } = useAuth();
-
-  // 점수 변화 입력 (과목 코드 → delta)
-  const [scoreDeltas, setScoreDeltas] = useState({ KOR: 0, MATH: 5, ENG: 0 });
+  const [deltas, setDeltas] = useState(
+    SUBJECTS.map((s) => ({ subject_code: s.code, label: s.label, delta: 0 }))
+  );
   const [hoursDelta, setHoursDelta] = useState(2);
+  const [direction, setDirection] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const { message: error, isError: errorIsError, flashError: setError } = useFlashMessage(8000);
+  const { message: error, flashError: setError } = useFlashMessage(8000);
 
-  const setDelta = (key, val) =>
-    setScoreDeltas((prev) => ({ ...prev, [key]: val === '' ? 0 : Number(val) }));
+  const setDelta = (code, val) =>
+    setDeltas((prev) =>
+      prev.map((d) => (d.subject_code === code ? { ...d, delta: val === '' ? 0 : Number(val) } : d))
+    );
 
   const validate = () => {
-    for (const { key, label } of SUBJECT_INPUTS) {
-      const v = Number(scoreDeltas[key]);
-      if (v < -50 || v > 50) return `${label} 점수 변화는 -50~+50 사이로 입력해줘.`;
+    for (const d of deltas) {
+      if (d.delta < -50 || d.delta > 50) return `${d.label} 변화는 -50~+50 사이로 입력해줘.`;
     }
-    const h = Number(hoursDelta);
-    if (h < -20 || h > 40) return '주간 시간 변화는 -20~+40 사이로 입력해줘.';
+    if (Number(hoursDelta) < -20 || Number(hoursDelta) > 40)
+      return '주간 시간 변화는 -20~+40 사이로 입력해줘.';
     return null;
   };
 
-  const runSimulation = async (e) => {
+  const run = async (e) => {
     e.preventDefault();
-    const validationError = validate();
-    if (validationError) { setError(validationError); return; }
+    const err = validate();
+    if (err) { setError(err); return; }
     setLoading(true);
     setResult(null);
     try {
@@ -113,8 +204,12 @@ export default function StudentSimulatorPage() {
         method: 'POST',
         token,
         body: {
-          score_deltas: scoreDeltas,
+          goal_id: null,
+          subject_score_deltas: deltas
+            .filter((d) => d.delta !== 0)
+            .map(({ subject_code, delta }) => ({ subject_code, delta })),
           weekly_hours_delta: Number(hoursDelta || 0),
+          assume_direction: direction || null,
         },
       });
       setResult(payload);
@@ -125,26 +220,26 @@ export default function StudentSimulatorPage() {
     }
   };
 
-  const priorities = result?.changed_subject_priorities || [];
+  // 입력이 바뀌면 결과 자동 초기화 유도
+  const resetResult = () => { if (result) setResult(null); };
 
   return (
     <Layout title="시뮬레이터">
-      {/* 입력 폼 */}
       <SectionCard
         title="What-if 시뮬레이션"
-        subtitle="점수나 공부 시간이 바뀌면 목표대학 gap이 어떻게 달라지는지 확인해."
+        subtitle="숫자 조정 → gap 변화 즉시 확인"
       >
-        <form className="simulator-form" onSubmit={runSimulation}>
+        <form className="simulator-form" onSubmit={run}>
           <div>
             <p className="section-micro-label">과목별 점수 변화 (현재 대비 +/- 점)</p>
             <div className="simulator-subject-inputs">
-              {SUBJECT_INPUTS.map(({ key, label }) => (
-                <label key={key} style={{ display: 'grid', gap: '0.25rem' }}>
+              {deltas.map(({ subject_code, label, delta }) => (
+                <label key={subject_code} style={{ display: 'grid', gap: '0.25rem' }}>
                   <span className="muted small">{label}</span>
                   <input
                     type="number"
-                    value={scoreDeltas[key]}
-                    onChange={(e) => setDelta(key, e.target.value)}
+                    value={delta}
+                    onChange={(e) => { setDelta(subject_code, e.target.value); resetResult(); }}
                     min={-50}
                     max={50}
                     step={1}
@@ -154,22 +249,37 @@ export default function StudentSimulatorPage() {
             </div>
           </div>
 
-          <label style={{ display: 'grid', gap: '0.25rem' }}>
-            <span className="section-micro-label">주간 공부 시간 변화 (+/- 시간)</span>
-            <input
-              type="number"
-              value={hoursDelta}
-              onChange={(e) => setHoursDelta(e.target.value)}
-              min={-20}
-              max={40}
-              step={0.5}
-              style={{ maxWidth: '10rem' }}
-            />
-          </label>
+          <div className="sim-input-row">
+            <label style={{ display: 'grid', gap: '0.25rem' }}>
+              <span className="section-micro-label">주간 공부 시간 변화 (+/- 시간)</span>
+              <input
+                type="number"
+                value={hoursDelta}
+                onChange={(e) => { setHoursDelta(e.target.value); resetResult(); }}
+                min={-20}
+                max={40}
+                step={0.5}
+                style={{ maxWidth: '9rem' }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: '0.25rem' }}>
+              <span className="section-micro-label">지원 방향 가정</span>
+              <select
+                value={direction}
+                onChange={(e) => { setDirection(e.target.value); resetResult(); }}
+                style={{ maxWidth: '12rem' }}
+              >
+                {DIRECTION_OPTS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <div>
             <button type="submit" disabled={loading}>
-              {loading ? '계산 중...' : '시뮬레이션 실행'}
+              {loading ? '계산 중...' : '바로 계산하기'}
             </button>
           </div>
         </form>
@@ -180,83 +290,47 @@ export default function StudentSimulatorPage() {
       {result ? (
         <>
           {/* 추천 요약 */}
-          {result.recommended_scenario_summary ? (
+          {result.scenario?.summary ? (
             <div className="info-box">
-              <strong>AI 추천:</strong> {result.recommended_scenario_summary}
+              <strong>AI 분석:</strong> {result.scenario.summary}
             </div>
           ) : null}
 
-          {/* 변경 전/후 gap */}
-          {(result.before || result.after) ? (
+          {/* 비교 결과: 넓은 카드 + 입력값 요약 compact (있을 때만 8-4) */}
+          <div className={`page-row${result.inputs_echo ? ' r-8-4' : ''}`}>
             <SectionCard
-              title="Gap 변화"
-              subtitle="입력한 변화가 적용됐을 때 목표대학 gap이 얼마나 바뀌는지야."
+              title="변경 전/후 비교"
+              subtitle="변동 항목은 강조 표시됨"
             >
-              <BeforeAfterGap before={result.before} after={result.after} />
-              {result.after?.weekly_hours != null ? (
-                <p className="muted small" style={{ marginTop: '0.6rem' }}>
-                  변경 후 필요 주간 공부 시간:{' '}
-                  <strong>{formatNumber(result.after.weekly_hours)}시간</strong>
-                </p>
-              ) : null}
+              <SimComparePanel
+                baseline={result.baseline}
+                scenario={result.scenario}
+              />
             </SectionCard>
-          ) : null}
 
-          {/* 시나리오 비교 */}
-          {result.scenarios?.length > 0 ? (
-            <SectionCard
-              title="시나리오 비교"
-              subtitle="현재·도전·안정 세 가지 방향을 비교해서 선택해봐."
-            >
-              <ScenarioCompareGrid scenarios={result.scenarios} />
-            </SectionCard>
-          ) : (
-            /* scenarios 배열이 없으면 단순 결과 표시 */
-            result.updated_goal_gap ? (
-              <SectionCard title="결과 요약" subtitle="이 결과는 탐색용 계산이야. 실제 DB에는 저장되지 않아.">
-                <div className="highlight-card">
-                  <p className="muted small" style={{ margin: 0 }}>
-                    변경 후 주간 공부 시간:{' '}
-                    <strong>
-                      {formatNumber(result.updated_goal_gap.weekly_hours_after_change)}시간
-                    </strong>
-                  </p>
+            {result.inputs_echo ? (
+              <SectionCard title="입력값 요약" compact>
+                <div className="flat-list">
+                  {deltas.filter((d) => d.delta !== 0).map((d) => (
+                    <div key={d.subject_code} className="flat-row">
+                      <span>{d.label}</span>
+                      <span className={d.delta > 0 ? 'sim-up' : 'sim-down'}>
+                        {d.delta > 0 ? `+${d.delta}` : d.delta}점
+                      </span>
+                    </div>
+                  ))}
+                  {Number(hoursDelta) !== 0 ? (
+                    <div className="flat-row">
+                      <span>주간 시간</span>
+                      <span className={Number(hoursDelta) > 0 ? 'sim-up' : 'sim-down'}>
+                        {Number(hoursDelta) > 0 ? `+${hoursDelta}` : hoursDelta}시간
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </SectionCard>
-            ) : null
-          )}
-
-          {/* 과목 우선순위 변화 */}
-          {priorities.length > 0 ? (
-            <SectionCard
-              title="과목 우선순위 변화"
-              subtitle="시뮬레이션 후 가장 먼저 손볼 과목 순서야."
-            >
-              <div className="simple-list">
-                {priorities.map((subject, i) => (
-                  <div
-                    key={subject.subject_code || subject.subject_name}
-                    className="list-row"
-                  >
-                    <div>
-                      <strong>
-                        {i + 1}. {subject.subject_name}
-                      </strong>
-                      <p className="muted small" style={{ margin: 0 }}>
-                        예상 gap {formatNumber(subject.simulated_gap ?? subject.gap, 1)}점
-                        {subject.weight != null
-                          ? ` · 반영 비중 ${formatNumber(subject.weight * 100, 0)}%`
-                          : ''}
-                      </p>
-                    </div>
-                    {subject.change_label ? (
-                      <span className="muted small">{subject.change_label}</span>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
-          ) : null}
+            ) : null}
+          </div>
         </>
       ) : null}
     </Layout>

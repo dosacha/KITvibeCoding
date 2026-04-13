@@ -132,7 +132,7 @@ export default function StudentGrowthPage() {
       {data ? (
         <>
           {/* 성장 요약 */}
-          <SectionCard title="성장 요약" subtitle="점수, 목표대학 gap, 실행률 변화를 한눈에 봐.">
+          <SectionCard title="성장 요약" subtitle="점수 · gap · 실행률 한눈에 보기">
             <div className="highlight-card">
               <h3 style={{ marginBottom: 0 }}>{data.summary || '최근 결과와 실행 기록을 바탕으로 다음 조정 포인트를 확인해보자.'}</h3>
               {data.weakness_shift ? (
@@ -171,60 +171,53 @@ export default function StudentGrowthPage() {
             ) : null}
           </SectionCard>
 
-          {/* 과목별 점수 흐름 */}
-          <SectionCard title="과목별 점수 흐름" subtitle="최근 시험에서 점수가 어떻게 바뀌었는지 봐.">
-            <ScoreTrendChart scoreTrend={data.score_trend} />
-          </SectionCard>
-
-          {/* 목표대학 Gap 감소 추이 */}
-          {data.gap_trend?.length > 0 ? (
-            <SectionCard
-              title="목표대학 Gap 변화"
-              subtitle="gap이 줄어들수록 목표대학에 가까워지는 거야."
-            >
-              <GapTrendChart gapTrend={data.gap_trend} />
+          {/* Row: 점수 흐름(넓) + Gap 변화(같이 있으면 6-6, 혼자면 단독) */}
+          <div className={`page-row${data.gap_trend?.length > 0 ? ' r-6-6' : ''}`}>
+            <SectionCard title="과목별 점수 흐름" subtitle="최근 시험 점수 변화">
+              <ScoreTrendChart scoreTrend={data.score_trend} />
             </SectionCard>
-          ) : null}
+            {data.gap_trend?.length > 0 ? (
+              <SectionCard title="목표대학 Gap 변화" subtitle="gap이 줄수록 목표에 가까워짐">
+                <GapTrendChart gapTrend={data.gap_trend} />
+              </SectionCard>
+            ) : null}
+          </div>
 
-          {/* 주간 실행률 추이 */}
-          {data.execution_trend?.length > 0 ? (
-            <SectionCard
-              title="주간 실행률 추이"
-              subtitle="계획 대비 실제 수행률 변화야. 꾸준함이 중요해."
-            >
-              <ExecutionTrend executionTrend={data.execution_trend} />
-            </SectionCard>
-          ) : null}
-
-          {/* 안정성 흐름 */}
-          {data.stability_trend?.length > 0 ? (
-            <SectionCard
-              title="점수 안정성"
-              subtitle="값이 높을수록 점수 변동이 적어서 안정적이야."
-            >
-              <div className="simple-list">
-                {data.stability_trend.map((item) => {
-                  const pct = Math.min(100, Math.round((item.stability ?? 0) * 100));
-                  return (
-                    <div key={item.subject_code} className="list-row">
-                      <strong>{item.subject_name}</strong>
-                      <div style={{ flex: 1, maxWidth: '8rem' }}>
-                        <div className="score-bar-track">
-                          <div
-                            className="score-bar-fill"
-                            style={{
-                              width: `${pct}%`,
-                              background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
-                            }}
-                          />
+          {/* Row: 실행률 추이 + 안정성 (둘 다 있으면 6-6) */}
+          {(data.execution_trend?.length > 0 || data.stability_trend?.length > 0) ? (
+            <div className={`page-row${data.execution_trend?.length > 0 && data.stability_trend?.length > 0 ? ' r-6-6' : ''}`}>
+              {data.execution_trend?.length > 0 ? (
+                <SectionCard title="주간 실행률 추이" subtitle="계획 대비 실제 수행률">
+                  <ExecutionTrend executionTrend={data.execution_trend} />
+                </SectionCard>
+              ) : null}
+              {data.stability_trend?.length > 0 ? (
+                <SectionCard title="점수 안정성" subtitle="높을수록 점수 변동이 적음">
+                  <div className="simple-list">
+                    {data.stability_trend.map((item) => {
+                      const pct = Math.min(100, Math.round((item.stability ?? 0) * 100));
+                      return (
+                        <div key={item.subject_code} className="list-row">
+                          <strong>{item.subject_name}</strong>
+                          <div style={{ flex: 1, maxWidth: '8rem' }}>
+                            <div className="score-bar-track">
+                              <div
+                                className="score-bar-fill"
+                                style={{
+                                  width: `${pct}%`,
+                                  background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <span className="muted small">{formatNumber(item.stability * 100, 0)}점</span>
                         </div>
-                      </div>
-                      <span className="muted small">{formatNumber(item.stability * 100, 0)}점</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </SectionCard>
+                      );
+                    })}
+                  </div>
+                </SectionCard>
+              ) : null}
+            </div>
           ) : null}
         </>
       ) : null}

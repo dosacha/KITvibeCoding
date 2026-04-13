@@ -39,6 +39,24 @@ def student_home(db: Session = Depends(get_db), current_user=Depends(require_rol
     return student_frontend_v2.build_home(db, current_user=current_user)
 
 
+@router.put("/student/home/today-focus")
+def save_student_today_focus(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.save_today_focus(db, current_user=current_user, payload=payload)
+
+
+@router.post("/student/home/today-focus/recommend")
+def recommend_student_today_focus(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.recommend_today_focus(db, current_user=current_user, payload=payload)
+
+
 @router.get("/student/diagnosis")
 def student_diagnosis_v2(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.STUDENT))):
     return student_frontend_v2.build_diagnosis(db, current_user=current_user)
@@ -96,6 +114,15 @@ def save_student_strategy_workspace_notes(
     return student_frontend_v2.save_strategy_workspace_note(db, current_user=current_user, payload=payload)
 
 
+@router.post("/student/strategy-workspace/recommend")
+def recommend_student_strategy_workspace(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.recommend_strategy_workspace(db, current_user=current_user, payload=payload)
+
+
 @router.delete("/student/strategy-workspace/reset")
 def reset_student_strategy_workspace(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.STUDENT))):
     return student_frontend_v2.reset_strategy_workspace(db, current_user=current_user)
@@ -109,6 +136,38 @@ def submit_student_strategy_workspace(db: Session = Depends(get_db), current_use
 @router.get("/student/strategy-workspace/timeline")
 def student_strategy_workspace_timeline(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.STUDENT))):
     return student_frontend_v2.build_workspace_timeline(db, current_user=current_user)
+
+
+@router.get("/student/strategy-chat")
+def student_strategy_chat(db: Session = Depends(get_db), current_user=Depends(require_roles(Role.STUDENT))):
+    return student_frontend_v2.build_strategy_chat(db, current_user=current_user)
+
+
+@router.post("/student/strategy-chat/messages")
+def student_strategy_chat_message(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.post_strategy_chat_message(db, current_user=current_user, payload=payload)
+
+
+@router.delete("/student/strategy-chat/messages/{message_id}")
+def delete_student_strategy_chat_message(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.delete_strategy_chat_message(db, current_user=current_user, message_id=message_id)
+
+
+@router.delete("/student/strategy-chat/thread/{thread_id}")
+def delete_student_strategy_chat_thread(
+    thread_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.delete_strategy_chat_thread(db, current_user=current_user, thread_id=thread_id)
 
 
 @router.get("/student/planner")
@@ -129,6 +188,16 @@ def generate_student_planner(
     return student_frontend_v2.generate_weekly_plan(db, current_user=current_user, week_start=payload.get("week_start"))
 
 
+@router.post("/student/planner/{plan_id}/regenerate")
+def regenerate_student_planner(
+    plan_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.regenerate_weekly_plan(db, current_user=current_user, plan_id=plan_id, payload=payload)
+
+
 @router.post("/student/planner/items/{item_id}/check")
 def check_student_planner_item(
     item_id: int,
@@ -137,6 +206,16 @@ def check_student_planner_item(
     current_user=Depends(require_roles(Role.STUDENT)),
 ):
     return student_frontend_v2.check_plan_item(db, current_user=current_user, item_id=item_id, payload=payload)
+
+
+@router.patch("/student/planner/items/{item_id}")
+def patch_student_planner_item(
+    item_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.patch_plan_item(db, current_user=current_user, item_id=item_id, payload=payload)
 
 
 @router.post("/student/planner/{plan_id}/reflection")
@@ -195,6 +274,15 @@ def update_student_onboarding_profile(
     return student_frontend_v2.update_onboarding_profile(db, current_user=current_user, payload=payload)
 
 
+@router.put("/student/onboarding/goals")
+def update_student_onboarding_goals(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.update_onboarding_goals(db, current_user=current_user, payload=payload)
+
+
 @router.post("/student/onboarding/habits")
 def create_student_onboarding_habit(
     payload: dict[str, Any] = Body(default_factory=dict),
@@ -202,6 +290,52 @@ def create_student_onboarding_habit(
     current_user=Depends(require_roles(Role.STUDENT)),
 ):
     return student_frontend_v2.add_onboarding_habit(db, current_user=current_user, payload=payload)
+
+
+@router.get("/student/community-exams")
+def student_community_exams(
+    query: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.list_community_exams(db, current_user=current_user, query=query)
+
+
+@router.post("/student/community-exams")
+def create_student_community_exam(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.create_community_exam(db, current_user=current_user, payload=payload)
+
+
+@router.get("/student/community-exams/{exam_id}")
+def student_community_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.get_community_exam(db, current_user=current_user, exam_id=exam_id)
+
+
+@router.post("/student/community-exams/{exam_id}/submissions")
+def submit_student_community_exam(
+    exam_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.submit_community_exam(db, current_user=current_user, exam_id=exam_id, payload=payload)
+
+
+@router.get("/student/community-exams/{exam_id}/stats")
+def student_community_exam_stats(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.STUDENT)),
+):
+    return student_frontend_v2.build_community_exam_stats(db, current_user=current_user, exam_id=exam_id)
 
 
 @router.get("/students", response_model=list[StudentSummaryRead])
@@ -257,6 +391,25 @@ def review_strategy_workspace(
         current_user=current_user,
         payload=payload,
     )
+
+
+@router.get("/instructor/students/{student_id}/strategy-chat")
+def instructor_student_strategy_chat(
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
+):
+    return student_frontend_v2.build_strategy_chat(db, current_user=current_user, student_id=student_id)
+
+
+@router.post("/instructor/students/{student_id}/strategy-chat/messages")
+def instructor_student_strategy_chat_message(
+    student_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(Role.ADMIN, Role.INSTRUCTOR)),
+):
+    return student_frontend_v2.post_strategy_chat_message(db, current_user=current_user, student_id=student_id, payload=payload)
 
 
 @router.get("/exams")
