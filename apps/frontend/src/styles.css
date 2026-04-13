@@ -231,6 +231,50 @@ label {
   margin-bottom: 0.2rem;
 }
 
+.highlight-card {
+  border: 1px solid #dbe7ff;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%);
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.simple-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #edf1f6;
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  background: #fff;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.evidence-card {
+  border: 1px solid #edf1f6;
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: #fff;
+}
+
+.compact-header {
+  margin-bottom: 0.5rem;
+}
+
+.planner-row {
+  align-items: flex-start;
+}
+
 .split-grid {
   display: grid;
   gap: 1rem;
@@ -1471,4 +1515,492 @@ textarea.invalid {
     height: auto;
     overflow-y: visible;
   }
+}
+
+/* ===== Sprint 1 — FE-001/002/101/102/103/104 ===== */
+
+/* 사이드바 nav 아이콘 */
+.nav-icon {
+  margin-right: 0.4rem;
+  font-size: 0.95em;
+}
+
+/* 학생 모바일 하단 내비 */
+.student-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  /* 모바일: 사이드바 숨기고 하단 내비 표시 */
+  .app-shell {
+    grid-template-columns: 1fr;
+    padding-bottom: 4rem; /* 하단 내비 높이만큼 여백 */
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .student-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #0f172a;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 100;
+    padding: 0.3rem 0 0.5rem;
+  }
+
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.35rem 0.2rem;
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 0.7rem;
+  }
+
+  .bottom-nav-item.active {
+    color: #60a5fa;
+  }
+
+  .bottom-nav-icon {
+    font-size: 1.25rem;
+  }
+
+  .bottom-nav-label {
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* 학생 홈 인사말 */
+.student-greeting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0 0.75rem;
+  flex-wrap: wrap;
+}
+
+.greeting-name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.greeting-date {
+  margin: 0.2rem 0 0;
+}
+
+/* 오늘의 할 일 */
+.today-tasks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.today-task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  background: #f8fbff;
+  border: 1px solid #e5ebf3;
+  border-radius: 12px;
+  font-size: 0.95rem;
+}
+
+.today-task-item.today-task-study {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.today-task-item.today-task-weakness {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.today-task-item.today-task-checkin {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.today-task-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: #1d4ed8;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.today-task-study .today-task-num { background: #1d4ed8; }
+.today-task-weakness .today-task-num { background: #d97706; }
+.today-task-checkin .today-task-num { background: #16a34a; }
+
+/* section-micro-label */
+.section-micro-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #5b677a;
+  margin-bottom: 0.35rem;
+}
+
+/* 이번 주 전략 링크 버튼들 */
+.weekly-summary-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+/* 성장 한 줄 요약 */
+.growth-one-liner {
+  margin: 0;
+  line-height: 1.65;
+  font-size: 0.95rem;
+}
+
+/* ── FE-102: 방향성 카드 ── */
+
+.direction-card {
+  border: 1px solid #e5ebf3;
+  border-radius: 14px;
+  padding: 1rem;
+  background: #f8fbff;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.direction-card.direction-susi {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.direction-card.direction-jeongsi {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+}
+
+.direction-card.direction-balanced {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.direction-card.direction-pending {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+}
+
+.direction-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.direction-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.direction-icon {
+  font-size: 1.1rem;
+}
+
+.direction-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.direction-badge-susi {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.direction-badge-jeongsi {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.direction-badge-balanced {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.direction-badge-pending {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.direction-confidence {
+  font-size: 0.82rem;
+}
+
+.direction-reasons {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.direction-reasons li {
+  font-size: 0.88rem;
+  padding-left: 1rem;
+  position: relative;
+  color: #334155;
+}
+
+.direction-reasons li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: #94a3b8;
+}
+
+.direction-cta-box {
+  background: white;
+  border: 1px solid #e5ebf3;
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+}
+
+.direction-cta-box p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.direction-cta-link {
+  font-size: 0.88rem;
+  color: #1d4ed8;
+}
+
+/* ── FE-103: 목표대학 gap 맵 ── */
+
+.goal-gap-map {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.goal-gap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.goal-gap-callout {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.goal-gap-callout .section-micro-label {
+  margin-bottom: 0;
+}
+
+.goal-gap-top-subject {
+  font-weight: 700;
+  font-size: 0.97rem;
+}
+
+.goal-gap-trend {
+  margin: 0;
+}
+
+.gap-band-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.gap-band-reach {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.gap-band-match {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.gap-band-safety {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.gap-subject-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.gap-subject-row {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.gap-subject-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gap-subject-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.gap-subject-right {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.gap-score-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.gap-score-ok {
+  color: #16a34a;
+}
+
+.gap-bar-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.gap-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.gap-fill-good { background: #22c55e; }
+.gap-fill-low  { background: #60a5fa; }
+.gap-fill-mid  { background: #f59e0b; }
+.gap-fill-high { background: #ef4444; }
+
+/* ── FE-104: 저신뢰 진단 보완 CTA ── */
+
+.confidence-checklist {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.confidence-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.confidence-count {
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.confidence-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.confidence-item {
+  display: grid;
+  grid-template-columns: 1rem 1fr auto;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.7rem 0.85rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+}
+
+.confidence-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #f59e0b;
+  margin-top: 0.3rem;
+  flex-shrink: 0;
+}
+
+.confidence-item-body {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.confidence-item-body strong {
+  font-size: 0.9rem;
+}
+
+.confidence-cta-link {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  color: #1d4ed8;
+  margin-top: 0.15rem;
+}
+
+/* ── 플레이스홀더 scaffold 페이지 ── */
+
+.scaffold-page {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  gap: 0.85rem;
+  background: white;
+  border: 1px dashed #d7deea;
+  border-radius: 18px;
+}
+
+.scaffold-icon {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.scaffold-page h3 {
+  margin: 0;
+  font-size: 1.15rem;
 }

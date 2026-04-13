@@ -20,10 +20,12 @@ export async function apiRequest(path, { method = 'GET', token, body, headers = 
   const response = await fetch(`${API_BASE_URL}${path}`, init);
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
+
   if (!response.ok) {
-    const detail = typeof payload === 'string' ? payload : payload?.detail || '요청에 실패했습니다.';
+    const detail = typeof payload === 'string' ? payload : payload?.detail || '요청 처리에 실패했어.';
     throw new Error(detail);
   }
+
   return payload;
 }
 
